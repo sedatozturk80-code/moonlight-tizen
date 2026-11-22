@@ -251,29 +251,41 @@
     wrap.innerHTML =
       '<div style="background:#1e2230;color:#fff;padding:36px 44px;border-radius:12px;width:60%;font:26px sans-serif;">' +
       '<div style="font-size:34px;margin-bottom:14px;">PS5 Türkçe çeviri</div>' +
-      '<div style="margin-bottom:18px;color:#ccc;">Gemini API anahtarınızı girin. Kumandanın Tamam tuşuyla kutuyu seçip klavyeyle yazabilir ya da telefondaki SmartThings uygulamasından yapıştırabilirsiniz. Bitince Tamam/Enter. Atlamak için Geri.</div>' +
+      '<div style="margin-bottom:18px;color:#ccc;">Gemini API anahtarınızı girin. Kumandanın Tamam tuşuyla kutuyu seçip klavyeyle yazabilir ya da telefondaki SmartThings uygulamasından yapıştırabilirsiniz. Bitince klavyede Bitti\'ye basın. Atlamak için Geri.</div>' +
       '<input id="vt_key_input" type="text" autocomplete="off" style="width:100%;font:26px monospace;padding:12px;border-radius:6px;border:2px solid #7CFC00;background:#11131a;color:#fff;" placeholder="AIza...">' +
       '<div id="vt_key_msg" style="margin-top:12px;color:#ffb347;"></div>' +
       '</div>';
     document.body.appendChild(wrap);
     var input = el('vt_key_input');
 
+    var closed = false;
     function close() {
+      if (closed) return;
+      closed = true;
       window.removeEventListener('keydown', onKey, true);
       if (wrap.parentNode) wrap.parentNode.removeChild(wrap);
     }
+    // Saves the key if it looks valid; returns true when the dialog was closed
+    function trySave(showMessage) {
+      var value = (input.value || '').trim();
+      if (value.length < 20) {
+        if (showMessage) el('vt_key_msg').textContent = 'Anahtar çok kısa görünüyor. Kutuyu seçip tekrar yazın.';
+        return false;
+      }
+      try { localStorage.setItem(KEY_STORAGE, value); } catch (err) {}
+      close();
+      return true;
+    }
+    // Tizen's on-screen keyboard: "Done" sends 65376, "Cancel" sends 65385
+    var DONE_KEYS = [13, 65376];
+    var BACK_KEYS = [10009, 27, 65385];
     function onKey(e) {
-      if (!el('vt_key_dialog')) return;
+      if (closed) return;
       var code = e.keyCode;
-      if (code === 13) {
-        var value = (input.value || '').trim();
-        if (value.length < 20) {
-          el('vt_key_msg').textContent = 'Anahtar çok kısa görünüyor.';
-        } else {
-          try { localStorage.setItem(KEY_STORAGE, value); } catch (err) {}
-          close();
-        }
-      } else if (code === 10009 || code === 27) {
+      if (DONE_KEYS.indexOf(code) >= 0) {
+        // With the keyboard closed, OK on an empty or short box opens the keyboard again
+        if (!trySave(true) && document.activeElement !== input) input.focus();
+      } else if (BACK_KEYS.indexOf(code) >= 0 && code !== 65385) {
         close();
       } else {
         // Let typing reach the input, but keep the app's own navigation from reacting
@@ -283,6 +295,9 @@
       e.preventDefault();
       e.stopImmediatePropagation();
     }
+    // When the keyboard closes the box loses focus or fires change: save then too
+    input.addEventListener('change', function () { trySave(false); });
+    input.addEventListener('blur', function () { setTimeout(function () { trySave(false); }, 100); });
     window.addEventListener('keydown', onKey, true);
     setTimeout(function () { input.focus(); }, 300);
   }
