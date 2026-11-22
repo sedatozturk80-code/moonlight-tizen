@@ -258,20 +258,22 @@
   };
 
   // One-time API key prompt, shown on the app's first screen (not during a stream)
-  function showKeyDialog() {
-    if (getKey() || el('vt_key_dialog')) return;
+  function showKeyDialog(force) {
+    if (el('vt_key_dialog')) return;
+    if (getKey() && !force) return;
     var wrap = document.createElement('div');
     wrap.id = 'vt_key_dialog';
     wrap.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,0.85);display:flex;align-items:center;justify-content:center;';
     wrap.innerHTML =
       '<div style="background:#1e2230;color:#fff;padding:36px 44px;border-radius:12px;width:60%;font:26px sans-serif;">' +
       '<div style="font-size:34px;margin-bottom:14px;">PS5 Türkçe çeviri</div>' +
-      '<div style="margin-bottom:18px;color:#ccc;">Gemini API anahtarınızı girin. Kumandanın Tamam tuşuyla kutuyu seçip klavyeyle yazabilir ya da telefondaki SmartThings uygulamasından yapıştırabilirsiniz. Anahtar tamamlanınca bu pencere kendiliğinden kapanır (v5). Atlamak için Geri.</div>' +
+      '<div style="margin-bottom:18px;color:#ccc;">Gemini API anahtarınızı girin. Kumandanın Tamam tuşuyla kutuyu seçip klavyeyle yazabilir ya da telefondaki SmartThings uygulamasından yapıştırabilirsiniz. Anahtar tamamlanınca bu pencere kendiliğinden kapanır. Atlamak için Geri. Anahtarı sonra değiştirmek için ana ekranda kumandanın YEŞİL tuşuna (ya da klavyede F2) basın. (v6)</div>' +
       '<input id="vt_key_input" type="text" autocomplete="off" style="width:100%;font:26px monospace;padding:12px;border-radius:6px;border:2px solid #7CFC00;background:#11131a;color:#fff;" placeholder="AIza...">' +
       '<div id="vt_key_msg" style="margin-top:12px;color:#ffb347;"></div>' +
       '</div>';
     document.body.appendChild(wrap);
     var input = el('vt_key_input');
+    if (force && getKey()) input.value = getKey();
 
     var closed = false;
     function close() {
@@ -327,5 +329,19 @@
     setTimeout(function () { input.focus(); }, 300);
   }
 
-  window.addEventListener('load', function () { setTimeout(showKeyDialog, 1500); });
+  window.addEventListener('load', function () { setTimeout(function () { showKeyDialog(false); }, 1500); });
+
+  // Green remote key (or F2 on a keyboard) on the app's screens, not during a stream,
+  // opens the key dialog again so the key can be changed
+  var GREEN_KEY = 404;
+  var F2_KEY = 113;
+  window.addEventListener('keydown', function (e) {
+    if (e.keyCode !== GREEN_KEY && e.keyCode !== F2_KEY) return;
+    var video = el('wasm_module');
+    var streaming = video && video.style.display !== 'none';
+    if (streaming || el('vt_key_dialog')) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    showKeyDialog(true);
+  }, true);
 })();
