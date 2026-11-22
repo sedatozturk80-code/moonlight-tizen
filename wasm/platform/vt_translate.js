@@ -17,7 +17,7 @@
 
   var GRID_W = 96;            // change-detection grid
   var GRID_H = 16;
-  var BRIGHT_LUMA = 170;      // subtitle text is usually white or light
+  var BRIGHT_LUMA = 185;      // subtitle text is near-white: every channel above this, little colour
   var MIN_TEXT_FRACTION = 0.0015;
   var STABLE_DIFF = 0.035;    // below this, two reads count as the same picture
   var NEW_TEXT_DIFF = 0.06;   // above this, the text differs from the last translated one
@@ -41,7 +41,9 @@
     lastLatencyMs: 0,
     noThinkingConfig: {},     // models that rejected thinkingConfig
     model: null,
-    lastError: ''
+    lastError: '',
+    lastReply: '',
+    emptyReads: 0
   };
 
   var work = document.createElement('canvas');
@@ -65,6 +67,7 @@
     else parts.push('hazır');
     if (state.requests) parts.push('istek ' + state.requests + ', son ' + (state.lastLatencyMs / 1000).toFixed(1) + ' sn');
     parts.push(getModel());
+    if (state.lastReply) parts.push('yanıt: ' + state.lastReply.replace(/\s+/g, ' ').slice(0, 50));
     if (state.lastError) parts.push('HATA: ' + state.lastError);
     setStatus(parts.join(' | '));
   }
@@ -101,12 +104,13 @@
       var gy = Math.min(GRID_H - 1, Math.floor(y * GRID_H / height));
       for (var x = 0; x < width; x += 2) {
         var i = (y * width + x) * 4;
-        var luma = (rgba[i] * 3 + rgba[i + 1] * 6 + rgba[i + 2]) / 10;
+        var r = rgba[i], g = rgba[i + 1], b = rgba[i + 2];
+        var hi = Math.max(r, g, b), lo = Math.min(r, g, b);
         var gx = Math.min(GRID_W - 1, Math.floor(x * GRID_W / width));
         var cell = gy * GRID_W + gx;
         counts[cell]++;
         total++;
-        if (luma > BRIGHT_LUMA) { sig[cell]++; bright++; }
+        if (lo > BRIGHT_LUMA && hi - lo < 45) { sig[cell]++; bright++; }
       }
     }
     for (var c = 0; c < sig.length; c++) sig[c] = counts[c] ? sig[c] / counts[c] : 0;
@@ -214,6 +218,7 @@
     translate(base64).then(function (text) {
       state.lastLatencyMs = Date.now() - started;
       if (text === null) return;
+      state.lastReply = text;
       if (!text || text === '-' || text === '—') showSubtitle('');
       else showSubtitle(text);
     }).catch(function (err) {
@@ -231,21 +236,24 @@
       var sig = signature(imageData.data, width, height);
 
       if (sig.textFraction < MIN_TEXT_FRACTION) {
-        // Nothing that looks like text: clear the old translation
+        // Nothing that looks like text for two reads in a row: clear the old translation
         state.prevSig = sig;
         state.stableCount = 0;
-        state.lastSentSig = null;
-        showSubtitle('');
+        state.emptyReads++;
+        if (state.emptyReads >= 2) {
+          state.lastSentSig = null;
+          showSubtitle('');
+        }
         refreshStatus();
         return;
       }
+      state.emptyReads = 0;
 
       var change = diff(sig, state.prevSig);
       state.stableCount = change < STABLE_DIFF ? state.stableCount + 1 : 0;
       state.prevSig = sig;
 
       var isNew = diff(sig, state.lastSentSig) > NEW_TEXT_DIFF;
-      if (isNew && change >= STABLE_DIFF) showSubtitle(''); // the text is changing; hide the stale line
 
       var gapOk = Date.now() - state.lastRequestAt >= MIN_REQUEST_GAP_MS;
       if (isNew && state.stableCount >= 1 && !state.inFlight && gapOk && getKey()) {
@@ -269,7 +277,7 @@
     wrap.innerHTML =
       '<div style="background:#1e2230;color:#fff;padding:36px 44px;border-radius:12px;width:60%;font:26px sans-serif;">' +
       '<div style="font-size:34px;margin-bottom:14px;">PS5 Türkçe çeviri</div>' +
-      '<div style="margin-bottom:18px;color:#ccc;">Gemini API anahtarınızı girin. Kumandanın Tamam tuşuyla kutuyu seçip klavyeyle yazabilir ya da telefondaki SmartThings uygulamasından yapıştırabilirsiniz. Anahtar tamamlanınca bu pencere kendiliğinden kapanır. Atlamak için Geri. Anahtarı sonra değiştirmek için ana ekranda kumandanın YEŞİL tuşuna (ya da klavyede F2) basın. (v7)</div>' +
+      '<div style="margin-bottom:18px;color:#ccc;">Gemini API anahtarınızı girin. Kumandanın Tamam tuşuyla kutuyu seçip klavyeyle yazabilir ya da telefondaki SmartThings uygulamasından yapıştırabilirsiniz. Anahtar tamamlanınca bu pencere kendiliğinden kapanır. Atlamak için Geri. Anahtarı sonra değiştirmek için ana ekranda kumandanın YEŞİL tuşuna (ya da klavyede F2) basın. (v8)</div>' +
       '<input id="vt_key_input" type="text" autocomplete="off" style="width:100%;font:26px monospace;padding:12px;border-radius:6px;border:2px solid #7CFC00;background:#11131a;color:#fff;" placeholder="AIza...">' +
       '<div id="vt_key_msg" style="margin-top:12px;color:#ffb347;"></div>' +
       '</div>';
