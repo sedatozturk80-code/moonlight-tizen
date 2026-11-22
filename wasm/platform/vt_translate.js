@@ -22,6 +22,7 @@
   var NEW_TEXT_DIFF = 0.06;   // above this, the text differs from the last translated one
   var MIN_REQUEST_GAP_MS = 1200;
   var JPEG_WIDTH = 960;
+  var REQUEST_TIMEOUT_MS = 15000;
 
   var PROMPT =
     'Bu görüntü bir video oyununun ekranının alt kısmıdır. Görüntüdeki oyun altyazısını ya da diyalog metnini oku ' +
@@ -59,9 +60,10 @@
   function refreshStatus() {
     var parts = ['TR çeviri'];
     if (!getKey()) parts.push('API anahtarı yok');
-    else if (state.inFlight) parts.push('çevriliyor...');
+    else if (state.inFlight) parts.push('çevriliyor... ' + ((Date.now() - state.lastRequestAt) / 1000).toFixed(0) + ' sn');
     else parts.push('hazır');
     if (state.requests) parts.push('istek ' + state.requests + ', son ' + (state.lastLatencyMs / 1000).toFixed(1) + ' sn');
+    parts.push(getModel());
     if (state.lastError) parts.push('HATA: ' + state.lastError);
     setStatus(parts.join(' | '));
   }
@@ -154,12 +156,20 @@
 
     var url = 'https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(getModel()) +
       ':generateContent?key=' + encodeURIComponent(key);
-    return fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
-    }).then(function (res) {
-      return res.json().then(function (json) { return { status: res.status, json: json }; });
+    // XMLHttpRequest with a hard timeout, so one stuck request can never block the rest
+    return new Promise(function (resolve, reject) {
+      var xhr = new XMLHttpRequest();
+      xhr.open('POST', url, true);
+      xhr.setRequestHeader('Content-Type', 'application/json');
+      xhr.timeout = REQUEST_TIMEOUT_MS;
+      xhr.onload = function () {
+        var json = null;
+        try { json = JSON.parse(xhr.responseText); } catch (e) { json = { error: { message: 'yanıt okunamadı: ' + String(xhr.responseText).slice(0, 60) } }; }
+        resolve({ status: xhr.status, json: json });
+      };
+      xhr.ontimeout = function () { reject(new Error('zaman aşımı (' + REQUEST_TIMEOUT_MS / 1000 + ' sn), model: ' + getModel())); };
+      xhr.onerror = function () { reject(new Error('ağ hatası: Gemini sunucusuna ulaşılamadı (status ' + xhr.status + ')')); };
+      xhr.send(JSON.stringify(body));
     }).then(function (r) {
       if (r.status === 200) {
         var cand = r.json.candidates && r.json.candidates[0];
@@ -251,7 +261,7 @@
     wrap.innerHTML =
       '<div style="background:#1e2230;color:#fff;padding:36px 44px;border-radius:12px;width:60%;font:26px sans-serif;">' +
       '<div style="font-size:34px;margin-bottom:14px;">PS5 Türkçe çeviri</div>' +
-      '<div style="margin-bottom:18px;color:#ccc;">Gemini API anahtarınızı girin. Kumandanın Tamam tuşuyla kutuyu seçip klavyeyle yazabilir ya da telefondaki SmartThings uygulamasından yapıştırabilirsiniz. Anahtar tamamlanınca bu pencere kendiliğinden kapanır (v3). Atlamak için Geri.</div>' +
+      '<div style="margin-bottom:18px;color:#ccc;">Gemini API anahtarınızı girin. Kumandanın Tamam tuşuyla kutuyu seçip klavyeyle yazabilir ya da telefondaki SmartThings uygulamasından yapıştırabilirsiniz. Anahtar tamamlanınca bu pencere kendiliğinden kapanır (v4). Atlamak için Geri.</div>' +
       '<input id="vt_key_input" type="text" autocomplete="off" style="width:100%;font:26px monospace;padding:12px;border-radius:6px;border:2px solid #7CFC00;background:#11131a;color:#fff;" placeholder="AIza...">' +
       '<div id="vt_key_msg" style="margin-top:12px;color:#ffb347;"></div>' +
       '</div>';
