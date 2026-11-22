@@ -1,10 +1,10 @@
-// Video texture test (PS5 Türkçe çeviri projesi, adım 2)
+// Video texture + live Turkish subtitles (PS5 Türkçe çeviri projesi, adım 3)
 //
 // The WASM Player decodes each video frame into a GL texture owned by this app instead of
 // drawing it on the <video> element. We draw that texture on a full-screen <canvas>, and
-// every 2 seconds we read the drawn frame back with glReadPixels. If the read works, the
-// app can see the game picture, which is what OCR and translation will need later.
-// The result is written on screen in the #vt_info box.
+// every second we read the subtitle area of the drawn frame back with glReadPixels. If the read works, the
+// app can see the game picture. The bottom of the picture is handed to vt_translate.js,
+// which sends new subtitles to Gemini and shows the Turkish translation (#vt_sub).
 
 #include "moonlight_wasm.hpp"
 
@@ -30,7 +30,9 @@ namespace {
 
 constexpr int kCanvasWidth = 1920;
 constexpr int kCanvasHeight = 1080;
-constexpr double kReadIntervalMs = 2000.0;
+constexpr double kReadIntervalMs = 1000.0;
+// Bottom part of the picture that is sent to the translator (subtitles live here)
+constexpr int kRegionHeight = kCanvasHeight * 30 / 100;
 
 const char* kVertexShader =
   "attribute vec2 a_position;\n"
@@ -154,38 +156,30 @@ bool InitGl() {
 
   glGenTextures(1, &s_texture);
   glViewport(0, 0, kCanvasWidth, kCanvasHeight);
-  s_pixels.resize((size_t)kCanvasWidth * kCanvasHeight * 4);
+  s_pixels.resize((size_t)kCanvasWidth * kRegionHeight * 4);
   return true;
 }
 
 void RequestFrame();
 
-// Reads the frame that was just drawn and reports what was seen
+// Reads the subtitle region of the frame that was just drawn and hands it to vt_translate.js
 void ReadBack() {
-  double start = emscripten_get_now();
-  glReadPixels(0, 0, kCanvasWidth, kCanvasHeight, GL_RGBA, GL_UNSIGNED_BYTE, s_pixels.data());
+  // GL's origin is the bottom-left corner, so rows 0..kRegionHeight are the bottom of the picture
+  glReadPixels(0, 0, kCanvasWidth, kRegionHeight, GL_RGBA, GL_UNSIGNED_BYTE, s_pixels.data());
   GLenum err = glGetError();
-  double elapsed = emscripten_get_now() - start;
-
-  uint64_t sum = 0;
-  uint32_t nonBlack = 0;
-  const size_t count = (size_t)kCanvasWidth * kCanvasHeight;
-  for (size_t i = 0; i < count; i += 16) {
-    const uint8_t* p = &s_pixels[i * 4];
-    uint32_t luma = (p[0] * 3u + p[1] * 6u + p[2]) / 10u;
-    sum += luma;
-    if (luma > 16) nonBlack++;
-  }
-  uint32_t samples = (uint32_t)(count / 16);
   s_readCount++;
-
-  char text[256];
-  snprintf(text, sizeof(text),
-           "VT TEST | okuma #%u | %dx%d | sure %.1f ms | ort. parlaklik %u | dolu piksel %%%u | cizilen kare %u | GL hata 0x%x",
-           s_readCount, kCanvasWidth, kCanvasHeight, elapsed,
-           (unsigned)(sum / samples), (unsigned)(nonBlack * 100u / samples), s_drawnFrames, (unsigned)err);
-  MoonlightInstance::ClLogMessage("%s\n", text);
-  SetInfo(text);
+  if (err != GL_NO_ERROR) {
+    char text[96];
+    snprintf(text, sizeof(text), "VT HATA: kare okunamadi (GL 0x%x)", (unsigned)err);
+    SetInfo(text);
+    return;
+  }
+  EM_ASM({
+    if (window.vtOnSubtitleFrame) {
+      var copy = HEAPU8.slice($0, $0 + $1 * $2 * 4);
+      window.vtOnSubtitleFrame(copy, $1, $2);
+    }
+  }, s_pixels.data(), kCanvasWidth, kRegionHeight);
 }
 
 EM_BOOL OnAnimationFrame(double now, void*) {
@@ -245,7 +239,7 @@ void StartOnMainThread() {
     return;
   }
   ShowCanvas(true);
-  SetInfo("VT TEST: video doku modu basladi, ilk kare bekleniyor...");
+  SetInfo("TR ceviri: video doku modu basladi, ilk kare bekleniyor...");
   s_running = true;
   s_lastReadMs = 0.0;
   s_drawnFrames = 0;

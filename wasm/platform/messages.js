@@ -296,7 +296,7 @@ function handleMessage(msg) {
     $('#loadingSpinner').css('display', 'none');
     $('body').css('backgroundColor', '#282C38');
     $('#wasm_module').css('display', 'none');
-    $('#vt_canvas, #vt_info').css('display', 'none');
+    $('#vt_canvas, #vt_info, #vt_sub').css('display', 'none');
     // Show a termination snackbar message if the termination was unexpected
     var errorCode = parseInt(msg.replace('streamTerminated: ', ''));
     switch (errorCode) {
