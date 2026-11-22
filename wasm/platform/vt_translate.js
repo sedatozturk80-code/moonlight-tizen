@@ -12,7 +12,8 @@
   var KEY_STORAGE = 'vt_gemini_key';
   var MODEL_STORAGE = 'vt_gemini_model';
   var DEFAULT_MODEL = 'gemini-flash-latest';
-  var FALLBACK_MODEL = 'gemini-2.5-flash';
+  // Tried in order when a model is overloaded (503/429/500) or missing (404)
+  var MODEL_CHAIN = ['gemini-flash-latest', 'gemini-2.5-flash', 'gemini-flash-lite-latest', 'gemini-2.5-flash-lite'];
 
   var GRID_W = 96;            // change-detection grid
   var GRID_H = 16;
@@ -140,7 +141,8 @@
     return jpeg.toDataURL('image/jpeg', 0.85).split(',')[1];
   }
 
-  function translate(base64) {
+  function translate(base64, attempt) {
+    attempt = attempt || 0;
     var key = getKey();
     if (!key) return Promise.resolve(null);
     var body = {
@@ -181,11 +183,14 @@
       var message = (r.json && r.json.error && r.json.error.message) || ('HTTP ' + r.status);
       if (r.status === 400 && /thinking/i.test(message) && state.useThinkingConfig) {
         state.useThinkingConfig = false;
-        return translate(base64);
+        return translate(base64, attempt);
       }
-      if (r.status === 404 && getModel() !== FALLBACK_MODEL) {
-        state.model = FALLBACK_MODEL;
-        return translate(base64);
+      if ([404, 429, 500, 503].indexOf(r.status) >= 0 && attempt < MODEL_CHAIN.length - 1) {
+        // Move to the next model and keep it for later requests while it works
+        var idx = MODEL_CHAIN.indexOf(getModel());
+        state.model = MODEL_CHAIN[(idx + 1) % MODEL_CHAIN.length];
+        state.lastError = 'model değişti: ' + state.model;
+        return translate(base64, attempt + 1);
       }
       if (r.status === 400 && /api key/i.test(message)) {
         try { localStorage.removeItem(KEY_STORAGE); } catch (e) {}
@@ -261,7 +266,7 @@
     wrap.innerHTML =
       '<div style="background:#1e2230;color:#fff;padding:36px 44px;border-radius:12px;width:60%;font:26px sans-serif;">' +
       '<div style="font-size:34px;margin-bottom:14px;">PS5 Türkçe çeviri</div>' +
-      '<div style="margin-bottom:18px;color:#ccc;">Gemini API anahtarınızı girin. Kumandanın Tamam tuşuyla kutuyu seçip klavyeyle yazabilir ya da telefondaki SmartThings uygulamasından yapıştırabilirsiniz. Anahtar tamamlanınca bu pencere kendiliğinden kapanır (v4). Atlamak için Geri.</div>' +
+      '<div style="margin-bottom:18px;color:#ccc;">Gemini API anahtarınızı girin. Kumandanın Tamam tuşuyla kutuyu seçip klavyeyle yazabilir ya da telefondaki SmartThings uygulamasından yapıştırabilirsiniz. Anahtar tamamlanınca bu pencere kendiliğinden kapanır (v5). Atlamak için Geri.</div>' +
       '<input id="vt_key_input" type="text" autocomplete="off" style="width:100%;font:26px monospace;padding:12px;border-radius:6px;border:2px solid #7CFC00;background:#11131a;color:#fff;" placeholder="AIza...">' +
       '<div id="vt_key_msg" style="margin-top:12px;color:#ffb347;"></div>' +
       '</div>';
