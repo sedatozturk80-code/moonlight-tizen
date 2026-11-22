@@ -457,7 +457,7 @@ MessageResult MoonlightInstance::StartStream(std::string host, int httpPort, std
   // Create the media source with the selected latency and rendering modes
   m_Source = std::make_unique<samsung::wasm::ElementaryMediaStreamSource>(
     selectedLatencyMode,
-    EmssRenderingMode::kMediaElement
+    EmssRenderingMode::kVideoTexture  // VT test: frames go to our GL texture
   );
   // Set the source listener to the media source
   m_Source->SetListener(&m_SourceListener);

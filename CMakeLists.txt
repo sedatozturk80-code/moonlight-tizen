@@ -239,6 +239,7 @@ add_executable(moonlight-wasm
     wasm/main.cpp
     wasm/profiling.cpp
     wasm/wasmplayer.cpp
+    wasm/vtexture.cpp
 )
 target_include_directories(moonlight-wasm PUBLIC
     wasm

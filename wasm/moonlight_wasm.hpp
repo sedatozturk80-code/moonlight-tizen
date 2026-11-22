@@ -183,6 +183,9 @@ class MoonlightInstance {
 
   LoadResult LoadCert(const char* certStr, const char* keyStr);
 
+  // Used by the video texture test in vtexture.cpp
+  samsung::wasm::ElementaryMediaTrack& VideoTrack() { return m_VideoTrack; }
+
   private:
     using EmssReadyState = samsung::wasm::ElementaryMediaStreamSource::ReadyState;
     using EmssTrackCloseReason = samsung::wasm::ElementaryMediaTrack::CloseReason;
@@ -336,6 +339,9 @@ EM_BOOL handleMouseDown(int eventType, const EmscriptenMouseEvent* keyEvent, voi
 EM_BOOL handleWheel(int eventType, const EmscriptenWheelEvent* keyEvent, void* userData);
 EM_BOOL handlePointerLockChange(int eventType, const EmscriptenPointerlockChangeEvent *pointerlockChangeEvent, void *userData);
 EM_BOOL handlePointerLockError(int eventType, const void *reserved, void *userData);
+
+void VideoTextureStart();
+void VideoTextureStop();
 
 void onConnectionStarted();
 void onConnectionStopped(int errorCode);

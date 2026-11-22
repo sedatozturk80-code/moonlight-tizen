@@ -856,5 +856,8 @@
     <!-- This button exists to suppress the snackbar warning, we're really using a toast -->
   </div>
   <video id="wasm_module" autoplay tabindex="-1"></video>
+  <!-- VT test: the video is drawn here from a GL texture, and the frame read result is shown in vt_info -->
+  <canvas id="vt_canvas" style="display:none; position:fixed; left:0; top:0; width:100vw; height:100vh; z-index:5; pointer-events:none; background:#000;"></canvas>
+  <div id="vt_info" style="display:none; position:fixed; left:24px; top:24px; z-index:9999; pointer-events:none; padding:8px 14px; background:rgba(0,0,0,0.75); color:#7CFC00; font:20px monospace; border-radius:6px;"></div>
 </body>
 </html>

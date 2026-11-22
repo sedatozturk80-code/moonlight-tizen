@@ -122,10 +122,13 @@ void MoonlightInstance::VideoTrackListener::OnTrackOpen() {
   m_Instance->m_VideoStarted = true;
   m_Instance->m_EmssVideoStateChanged.notify_all();
   LiRequestIdrFrame();
+  // VT test: start drawing decoded frames from our own GL texture
+  VideoTextureStart();
 }
 
 void MoonlightInstance::VideoTrackListener::OnTrackClosed(samsung::wasm::ElementaryMediaTrack::CloseReason) {
   ClLogMessage("VIDEO ElementaryMediaTrack::OnTrackClosed\n");
+  VideoTextureStop();
   std::unique_lock<std::mutex> lock(m_Instance->m_Mutex);
   m_Instance->m_VideoStarted = false;
 }
