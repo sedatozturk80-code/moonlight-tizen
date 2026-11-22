@@ -39,7 +39,7 @@
     lastRequestAt: 0,
     requests: 0,
     lastLatencyMs: 0,
-    useThinkingConfig: true,
+    noThinkingConfig: {},     // models that rejected thinkingConfig
     model: null,
     lastError: ''
   };
@@ -154,9 +154,10 @@
       }],
       generationConfig: { temperature: 0.2, maxOutputTokens: 256 }
     };
-    if (state.useThinkingConfig) body.generationConfig.thinkingConfig = { thinkingBudget: 0 };
+    var model = getModel();
+    if (!state.noThinkingConfig[model]) body.generationConfig.thinkingConfig = { thinkingBudget: 0 };
 
-    var url = 'https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(getModel()) +
+    var url = 'https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) +
       ':generateContent?key=' + encodeURIComponent(key);
     // XMLHttpRequest with a hard timeout, so one stuck request can never block the rest
     return new Promise(function (resolve, reject) {
@@ -181,11 +182,12 @@
         return text;
       }
       var message = (r.json && r.json.error && r.json.error.message) || ('HTTP ' + r.status);
-      if (r.status === 400 && /thinking/i.test(message) && state.useThinkingConfig) {
-        state.useThinkingConfig = false;
+      // A generic 400 is usually the thinking setting this model does not accept: retry without it
+      if (r.status === 400 && !/api key/i.test(message) && !state.noThinkingConfig[model]) {
+        state.noThinkingConfig[model] = true;
         return translate(base64, attempt);
       }
-      if ([404, 429, 500, 503].indexOf(r.status) >= 0 && attempt < MODEL_CHAIN.length - 1) {
+      if ([400, 404, 429, 500, 503].indexOf(r.status) >= 0 && !/api key/i.test(message) && attempt < MODEL_CHAIN.length - 1) {
         // Move to the next model and keep it for later requests while it works
         var idx = MODEL_CHAIN.indexOf(getModel());
         state.model = MODEL_CHAIN[(idx + 1) % MODEL_CHAIN.length];
@@ -267,7 +269,7 @@
     wrap.innerHTML =
       '<div style="background:#1e2230;color:#fff;padding:36px 44px;border-radius:12px;width:60%;font:26px sans-serif;">' +
       '<div style="font-size:34px;margin-bottom:14px;">PS5 Türkçe çeviri</div>' +
-      '<div style="margin-bottom:18px;color:#ccc;">Gemini API anahtarınızı girin. Kumandanın Tamam tuşuyla kutuyu seçip klavyeyle yazabilir ya da telefondaki SmartThings uygulamasından yapıştırabilirsiniz. Anahtar tamamlanınca bu pencere kendiliğinden kapanır. Atlamak için Geri. Anahtarı sonra değiştirmek için ana ekranda kumandanın YEŞİL tuşuna (ya da klavyede F2) basın. (v6)</div>' +
+      '<div style="margin-bottom:18px;color:#ccc;">Gemini API anahtarınızı girin. Kumandanın Tamam tuşuyla kutuyu seçip klavyeyle yazabilir ya da telefondaki SmartThings uygulamasından yapıştırabilirsiniz. Anahtar tamamlanınca bu pencere kendiliğinden kapanır. Atlamak için Geri. Anahtarı sonra değiştirmek için ana ekranda kumandanın YEŞİL tuşuna (ya da klavyede F2) basın. (v7)</div>' +
       '<input id="vt_key_input" type="text" autocomplete="off" style="width:100%;font:26px monospace;padding:12px;border-radius:6px;border:2px solid #7CFC00;background:#11131a;color:#fff;" placeholder="AIza...">' +
       '<div id="vt_key_msg" style="margin-top:12px;color:#ffb347;"></div>' +
       '</div>';
