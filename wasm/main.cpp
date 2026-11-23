@@ -270,7 +270,7 @@ void* MoonlightInstance::ConnectionThreadFunc(void* context) {
   if (Ps5IsHost(me->m_Host)) {
     // Direct PS5 Remote Play: chiaki-ng feeds the same decoders (ps5stream.cpp)
     err = Ps5ConnectionRun(me->m_Host, me->m_StreamConfig.width, me->m_StreamConfig.height, me->m_StreamConfig.fps,
-                            me->m_StreamConfig.bitrate);
+                            me->m_StreamConfig.bitrate, me->m_StreamConfig.supportedVideoFormats);
     if (err != 0) {
       // Leave PS5 mode, so the next stream (or a PC stream) starts clean
       Ps5Stop();

@@ -162,7 +162,8 @@ int QueryState(const std::string& ip) {
 // header is kept here and put in front of every keyframe, and nothing is sent to the
 // player before the first keyframe.
 
-std::vector<uint8_t> s_paramSets;     // SPS + PPS NAL units with start codes
+bool s_hevc = false;                 // the PS5 sends HEVC (H.265) instead of H.264
+std::vector<uint8_t> s_paramSets;     // parameter sets (H.264 SPS + PPS, HEVC VPS + SPS + PPS) with start codes
 std::vector<uint8_t> s_keyframeBuf;   // parameter sets + keyframe
 bool s_gotKeyframe = false;
 uint32_t s_lastIdrRequestMs = 0;
@@ -221,7 +222,23 @@ bool ReadUe(const uint8_t* data, size_t size, size_t& bit, uint32_t& value) {
 }
 
 // A frame the decoder can start from: an IDR slice, or an I slice in a non-IDR picture
+int NalType(const uint8_t* buf, const Nal& n) {
+  return s_hevc ? (buf[n.payload] >> 1) & 0x3f : buf[n.payload] & 0x1f;
+}
+
+bool IsParamSet(int type) {
+  return s_hevc ? (type >= 32 && type <= 34) : (type == 7 || type == 8);
+}
+
 bool IsKeyframe(const uint8_t* buf, const std::vector<Nal>& nals) {
+  if (s_hevc) {
+    // IRAP pictures (BLA, IDR, CRA) are where an HEVC decoder can start
+    for (const Nal& n : nals) {
+      int type = NalType(buf, n);
+      if (type >= 16 && type <= 21) return true;
+    }
+    return false;
+  }
   for (const Nal& n : nals) {
     uint8_t type = buf[n.payload] & 0x1f;
     if (type == 5) return true;
@@ -240,15 +257,15 @@ bool IsKeyframe(const uint8_t* buf, const std::vector<Nal>& nals) {
 
 bool HasPictureData(const uint8_t* buf, const std::vector<Nal>& nals) {
   for (const Nal& n : nals) {
-    uint8_t type = buf[n.payload] & 0x1f;
-    if (type >= 1 && type <= 5) return true;
+    int type = NalType(buf, n);
+    if (s_hevc ? type <= 31 : (type >= 1 && type <= 5)) return true;
   }
   return false;
 }
 
 bool HasSps(const uint8_t* buf, const std::vector<Nal>& nals) {
   for (const Nal& n : nals)
-    if ((buf[n.payload] & 0x1f) == 7) return true;
+    if (NalType(buf, n) == (s_hevc ? 33 : 7)) return true;
   return false;
 }
 
@@ -256,8 +273,7 @@ bool HasSps(const uint8_t* buf, const std::vector<Nal>& nals) {
 void StoreParamSets(const uint8_t* buf, const std::vector<Nal>& nals) {
   std::vector<uint8_t> sets;
   for (const Nal& n : nals) {
-    uint8_t type = buf[n.payload] & 0x1f;
-    if (type == 7 || type == 8) {
+    if (IsParamSet(NalType(buf, n))) {
       static const uint8_t kStartCode[] = {0, 0, 0, 1};
       sets.insert(sets.end(), kStartCode, kStartCode + 4);
       sets.insert(sets.end(), buf + n.payload, buf + n.end);
@@ -323,11 +339,11 @@ bool VideoCb(uint8_t* buf, size_t size, int32_t framesLost, bool recovered, void
       std::string info = "NAL";
       char tmp[32];
       for (size_t i = 0; i < sent.size() && i < 8; i++) {
-        snprintf(tmp, sizeof(tmp), " %d", data[sent[i].payload] & 0x1f);
+        snprintf(tmp, sizeof(tmp), " %d", NalType(data, sent[i]));
         info += tmp;
       }
       for (const Nal& n : sent) {
-        if ((data[n.payload] & 0x1f) == 7 && n.end - n.payload >= 4) {
+        if (!s_hevc && NalType(data, n) == 7 && n.end - n.payload >= 4) {
           snprintf(tmp, sizeof(tmp), ", SPS %02x%02x%02x", data[n.payload + 1], data[n.payload + 2], data[n.payload + 3]);
           info += tmp;
           break;
@@ -462,7 +478,7 @@ bool Ps5Mode() {
 
 // Runs on Moonlight's connection thread in place of LiStartConnection.
 // Returns 0 once the session has been started, or a negative error.
-int Ps5ConnectionRun(const std::string& host, int width, int height, int fps, int bitrateKbps) {
+int Ps5ConnectionRun(const std::string& host, int width, int height, int fps, int bitrateKbps, int videoFormats) {
   s_ps5Mode = true;
   s_stopRequested = false;
   s_connected = false;
@@ -545,7 +561,7 @@ int Ps5ConnectionRun(const std::string& host, int width, int height, int fps, in
     return -1;
   }
 
-  // The PS5 profile follows the app's resolution, frame rate and bitrate settings (H.264)
+  // The PS5 profile follows the app's resolution, frame rate, bitrate and codec settings
   ChiakiVideoResolutionPreset preset = CHIAKI_VIDEO_RESOLUTION_PRESET_1080p;
   if (height <= 540) preset = CHIAKI_VIDEO_RESOLUTION_PRESET_540p;
   else if (height <= 720) preset = CHIAKI_VIDEO_RESOLUTION_PRESET_720p;
@@ -553,7 +569,9 @@ int Ps5ConnectionRun(const std::string& host, int width, int height, int fps, in
                                       fps >= 60 ? CHIAKI_VIDEO_FPS_PRESET_60 : CHIAKI_VIDEO_FPS_PRESET_30);
   (void)width;
   if (bitrateKbps >= 2000 && bitrateKbps <= 50000) info.video_profile.bitrate = (unsigned int)bitrateKbps;
-  info.video_profile.codec = CHIAKI_CODEC_H264;
+  // HEVC when it is chosen in the app's codec setting, H.264 otherwise
+  s_hevc = (videoFormats & VIDEO_FORMAT_MASK_H265) != 0;
+  info.video_profile.codec = s_hevc ? CHIAKI_CODEC_H265 : CHIAKI_CODEC_H264;
   int streamWidth = (int)info.video_profile.width;
   int streamHeight = (int)info.video_profile.height;
   int streamFps = (int)info.video_profile.max_fps;
@@ -585,7 +603,7 @@ int Ps5ConnectionRun(const std::string& host, int width, int height, int fps, in
 
   // Video player (same media pipeline as a PC stream)
   PostToJs("ProgressMsg: Görüntü hazırlanıyor...");
-  int r = MoonlightInstance::s_DrCallbacks.setup(VIDEO_FORMAT_H264, streamWidth, streamHeight, streamFps, nullptr, 0);
+  int r = MoonlightInstance::s_DrCallbacks.setup(s_hevc ? VIDEO_FORMAT_H265 : VIDEO_FORMAT_H264, streamWidth, streamHeight, streamFps, nullptr, 0);
   if (r != 0) {
     MoonlightInstance::s_ArCallbacks.cleanup();
     return r;

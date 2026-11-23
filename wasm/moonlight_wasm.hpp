@@ -348,7 +348,7 @@ void ps5Discover(std::string ip);
 // Direct PS5 streaming (ps5stream.cpp)
 bool Ps5IsHost(const std::string& host);
 bool Ps5Mode();
-int Ps5ConnectionRun(const std::string& host, int width, int height, int fps, int bitrateKbps);
+int Ps5ConnectionRun(const std::string& host, int width, int height, int fps, int bitrateKbps, int videoFormats);
 void Ps5Stop();
 void Ps5RequestIdr();
 void Ps5SendController(int index, int buttonFlags, unsigned char leftTrigger, unsigned char rightTrigger,
