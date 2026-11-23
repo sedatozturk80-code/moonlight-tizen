@@ -106,7 +106,7 @@
 
   function lsGet(k) { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } }
   function lsSet(k, v) { try { if (v) localStorage.setItem(k, v); else localStorage.removeItem(k); } catch (e) {} }
-  function resetEvrenPicks() { evren.models = null; evren.vision = evren.ocr = evren.chat = ''; }
+  function resetEvrenPicks() { evren.models = null; evren.vision = evren.ocr = evren.chat = ''; evren.blockedUntil = 0; }
 
   function getGeminiKey() {
     try { return localStorage.getItem(KEY_STORAGE) || ''; } catch (e) { return ''; }
@@ -243,7 +243,38 @@
 
   // ---------- EVREN (OpenAI-compatible, data stays in Türkiye) ----------
 
-  var evren = { models: null, vision: '', ocr: '', chat: '', loading: null };
+  var evren = { models: null, vision: '', ocr: '', chat: '', loading: null, blockedUntil: 0, fullError: '' };
+  var EVREN_BLOCK_MS = 5 * 60 * 1000;   // after a failure, go straight to Gemini for a while
+
+  // Pulls the text out of the different OCR / chat response shapes
+  function extractText(json) {
+    if (!json) return '';
+    if (json.pages && json.pages.length) return json.pages.map(function (p) { return p.markdown || p.text || ''; }).join('\n');
+    if (typeof json.text === 'string') return json.text;
+    if (typeof json.result === 'string') return json.result;
+    if (typeof json.output_text === 'string') return json.output_text;
+    if (json.data && typeof json.data.text === 'string') return json.data.text;
+    var c = json.choices && json.choices[0];
+    if (c && c.message && typeof c.message.content === 'string') return c.message.content;
+    return '';
+  }
+
+  // EVREN's OCR model: the dedicated /ocr route first (Mistral-style), then chat completions
+  function evrenOcr(model, dataUrl) {
+    return xhrJson('POST', EVREN_BASE + '/ocr', getEvrenKey(), {
+      model: model,
+      document: { type: 'image_url', image_url: dataUrl }
+    }).then(function (r) {
+      if (r.status === 200) return stripThinking(extractText(r.json));
+      var ocrRouteError = '/ocr: ' + errorText(r);
+      return evrenChat(model, [
+        { type: 'text', text: 'Görüntüdeki tüm yazıları satır satır, olduğu gibi yaz. Başka bir şey ekleme.' },
+        { type: 'image_url', image_url: { url: dataUrl } }
+      ], 400).catch(function (err) {
+        throw new Error(ocrRouteError + ' || /chat/completions: ' + String(err && err.message || err));
+      });
+    });
+  }
 
   function xhrJson(method, url, key, body) {
     return new Promise(function (resolve) {
@@ -266,7 +297,7 @@
   function errorText(r) {
     var e = r.json && (r.json.error || r.json.detail);
     var m = (e && (e.message || e)) || ('HTTP ' + r.status);
-    return String(typeof m === 'string' ? m : JSON.stringify(m)).slice(0, 120);
+    return String(typeof m === 'string' ? m : JSON.stringify(m)).slice(0, 400);
   }
 
   // Picks the models once: a vision chat model if EVREN has one, otherwise its OCR model plus a chat model
@@ -343,10 +374,7 @@
         ], 300);
       }
       state.model = 'EVREN ' + m.ocr + ' + ' + m.chat;
-      return evrenChat(m.ocr, [
-        { type: 'text', text: 'Görüntüdeki tüm yazıları satır satır, olduğu gibi yaz. Başka bir şey ekleme.' },
-        { type: 'image_url', image_url: { url: dataUrl } }
-      ], 400).then(function (ocrText) {
+      return evrenOcr(m.ocr, dataUrl).then(function (ocrText) {
         if (!ocrText || !/[A-Za-z]{2}/.test(ocrText)) return '-';
         return evrenChat(m.chat, TRANSLATE_PROMPT + ocrText, 300);
       });
@@ -355,6 +383,8 @@
       return text;
     }, function (err) {
       var message = String(err && err.message || err);
+      evren.fullError = message;
+      evren.blockedUntil = Date.now() + EVREN_BLOCK_MS;
       if (/401|unauthor|api key|invalid.*key|yetki/i.test(message)) {
         message += ' (anahtarı ana ekranda YEŞİL tuşla değiştirin)';
       }
@@ -366,14 +396,15 @@
   // Both keys are kept. EVREN goes first when its key is set; if it fails and a Gemini key is
   // set, the same picture goes to Gemini. With only one key, only that service is used.
   function translate(base64) {
-    var hasEvren = !!getEvrenKey();
     var hasGemini = !!getGeminiKey();
+    // A recent EVREN failure sends lines straight to Gemini for a while, so they are not late
+    var hasEvren = !!getEvrenKey() && !(hasGemini && Date.now() < evren.blockedUntil);
     if (!hasEvren) return translateGemini(base64, 0);
     return translateEvren(base64).then(function (text) {
       if (text !== null || !hasGemini) return text;
       var evrenError = state.lastError;
       return translateGemini(base64, 0).then(function (g) {
-        if (g !== null) state.lastError = 'EVREN olmadı, Gemini kullanıldı (' + evrenError.slice(0, 60) + ')';
+        if (g !== null) state.lastError = 'EVREN olmadı, 5 dk Gemini kullanılacak (hata ayrıntısı: YEŞİL tuş / F2)';
         return g;
       });
     });
@@ -456,8 +487,9 @@
     wrap.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,0.88);display:flex;align-items:center;justify-content:center;';
     wrap.innerHTML =
       '<div style="background:#1e2230;color:#fff;padding:28px 40px;border-radius:12px;width:70%;max-height:90vh;display:flex;flex-direction:column;font:24px sans-serif;">' +
-      '<div style="font-size:32px;margin-bottom:10px;">PS5 Türkçe çeviri — ayarlar (v13)</div>' +
+      '<div style="font-size:32px;margin-bottom:10px;">PS5 Türkçe çeviri — ayarlar (v14)</div>' +
       '<div id="vt_key_state" style="margin-bottom:8px;color:#9fe;"></div>' +
+      '<div id="vt_evren_err" style="margin-bottom:8px;color:#f99;font-size:18px;word-break:break-all;max-height:160px;overflow:auto;"></div>' +
       '<div style="margin-bottom:12px;color:#ccc;font-size:20px;">Yeni anahtar: kutuyu seçip yazın ya da SmartThings\'ten yapıştırın, sonra Enter/Bitti. AIza ile başlayan anahtar Gemini, diğerleri EVREN olarak saklanır; ikisi de varsa önce EVREN, olmazsa Gemini kullanılır.</div>' +
       '<input id="vt_key_input" type="text" autocomplete="off" style="width:100%;box-sizing:border-box;font:24px monospace;padding:10px;border-radius:6px;border:2px solid #7CFC00;background:#11131a;color:#fff;" placeholder="EVREN ya da Gemini anahtarı">' +
       '<div id="vt_key_msg" style="margin-top:8px;color:#ffb347;min-height:28px;"></div>' +
@@ -478,6 +510,7 @@
       parts.push('okuma: ' + (lsGet(EVREN_READ_STORAGE) || 'otomatik'));
       parts.push('çeviri: ' + (lsGet(EVREN_CHAT_STORAGE) || 'otomatik'));
       el('vt_key_state').textContent = parts.join('  |  ');
+      el('vt_evren_err').textContent = evren.fullError ? ('Son EVREN hatası: ' + evren.fullError) : '';
     }
 
     function renderList() {
