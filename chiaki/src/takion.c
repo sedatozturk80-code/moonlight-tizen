@@ -243,7 +243,13 @@ CHIAKI_EXPORT ChiakiErrorCode chiaki_takion_connect(ChiakiTakion *takion, Chiaki
 	takion->enable_dualsense = info->enable_dualsense;
 
 	CHIAKI_LOGI(takion->log, "Takion connecting (version %u)", (unsigned int)info->protocol_version);
+#ifdef CHIAKI_TIZEN_WASM
+	// Tizen WASM sockets reject IP_MTU_DISCOVER ("Protocol not available"); treat
+	// the Don't Fragment setting as optional there instead of failing the stream
+	bool mac_dontfrag = false;
+#else
 	bool mac_dontfrag = true;
+#endif
 
 	ChiakiErrorCode err = chiaki_stop_pipe_init(&takion->stop_pipe);
 	if(err != CHIAKI_ERR_SUCCESS)
