@@ -233,8 +233,10 @@ class MoonlightInstance {
   void UnlockMouse();
 
   static CONNECTION_LISTENER_CALLBACKS s_ClCallbacks;
+  public:  // also used by the direct PS5 stream (ps5stream.cpp)
   static DECODER_RENDERER_CALLBACKS s_DrCallbacks;
   static AUDIO_RENDERER_CALLBACKS s_ArCallbacks;
+  private:
 
   std::string m_Host;
   int m_HttpPort;
