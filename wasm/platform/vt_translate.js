@@ -27,6 +27,11 @@
   var MIN_REQUEST_GAP_MS = 1200;
   var JPEG_WIDTH = 960;
   var REQUEST_TIMEOUT_MS = 8000;
+  // A translation arrives 1-2 s after its line, so keep it readable for a while even if the
+  // game has already hidden the original; a newer translation replaces it at once
+  var MIN_SHOW_MS = 3000;          // never hide sooner than this
+  var READ_MS_PER_CHAR = 70;       // longer lines stay longer
+  var MAX_SHOW_MS = 9000;
 
   var PROMPT =
     'Bu görüntü bir video oyununun ekranının alt kısmıdır. Görüntüdeki oyun altyazısını ya da diyalog metnini oku ' +
@@ -75,16 +80,26 @@
     setStatus(parts.join(' | '));
   }
 
+  var shownAt = 0;
+  var showFor = 0;
   function showSubtitle(text) {
     var box = el('vt_sub');
     if (!box) return;
     if (!text) {
       box.style.display = 'none';
       box.textContent = '';
+      shownAt = 0;
       return;
     }
     box.textContent = text;
     box.style.display = 'block';
+    shownAt = Date.now();
+    showFor = Math.min(MAX_SHOW_MS, Math.max(MIN_SHOW_MS, text.length * READ_MS_PER_CHAR));
+  }
+  // Hides the translation only after it has been readable long enough
+  function hideSubtitleWhenRead() {
+    if (shownAt && Date.now() - shownAt < showFor) return;
+    showSubtitle('');
   }
 
   function getGeminiKey() {
@@ -350,7 +365,7 @@
       state.lastLatencyMs = Date.now() - started;
       if (text === null) return;
       state.lastReply = text;
-      if (!text || text === '-' || text === '—') showSubtitle('');
+      if (!text || text === '-' || text === '—') hideSubtitleWhenRead();
       else showSubtitle(text);
     }).catch(function (err) {
       state.lastError = String(err && err.message || err).slice(0, 120);
@@ -373,7 +388,7 @@
         state.emptyReads++;
         if (state.emptyReads >= 2) {
           state.lastSentSig = null;
-          showSubtitle('');
+          hideSubtitleWhenRead();
         }
         refreshStatus();
         return;
@@ -409,7 +424,7 @@
       '<div style="background:#1e2230;color:#fff;padding:36px 44px;border-radius:12px;width:60%;font:26px sans-serif;">' +
       '<div style="font-size:34px;margin-bottom:14px;">PS5 Türkçe çeviri</div>' +
       '<div style="margin-bottom:10px;color:#9fe;">EVREN anahtarı girerseniz çeviri EVREN ile yapılır (veriler Türkiye\'de kalır). AIza ile başlayan bir anahtar Gemini anahtarıdır.</div>' +
-      '<div style="margin-bottom:18px;color:#ccc;">EVREN ya da Gemini API anahtarınızı girin. Kumandanın Tamam tuşuyla kutuyu seçip klavyeyle yazabilir ya da telefondaki SmartThings uygulamasından yapıştırabilirsiniz. Anahtar tamamlanınca bu pencere kendiliğinden kapanır. Atlamak için Geri. Anahtarı sonra değiştirmek için ana ekranda kumandanın YEŞİL tuşuna (ya da klavyede F2) basın. (v10)</div>' +
+      '<div style="margin-bottom:18px;color:#ccc;">EVREN ya da Gemini API anahtarınızı girin. Kumandanın Tamam tuşuyla kutuyu seçip klavyeyle yazabilir ya da telefondaki SmartThings uygulamasından yapıştırabilirsiniz. Anahtar tamamlanınca bu pencere kendiliğinden kapanır. Atlamak için Geri. Anahtarı sonra değiştirmek için ana ekranda kumandanın YEŞİL tuşuna (ya da klavyede F2) basın. (v11)</div>' +
       '<input id="vt_key_input" type="text" autocomplete="off" style="width:100%;font:26px monospace;padding:12px;border-radius:6px;border:2px solid #7CFC00;background:#11131a;color:#fff;" placeholder="AIza...">' +
       '<div id="vt_key_msg" style="margin-top:12px;color:#ffb347;"></div>' +
       '</div>';
