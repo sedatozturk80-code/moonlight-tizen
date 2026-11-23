@@ -29,9 +29,12 @@
   var MIN_TEXT_FRACTION = 0.0015;
   var STABLE_DIFF = 0.035;    // below this, two reads count as the same picture
   var NEW_TEXT_DIFF = 0.06;   // above this, the text differs from the last translated one
-  var MIN_REQUEST_GAP_MS = 1200;
+  // The free Gemini tier allows only a few requests a minute per model, so space them out
+  var MIN_REQUEST_GAP_MS = 3000;
+  // After every model answered 429 (quota), wait this long before the next request
+  var QUOTA_COOLDOWN_MS = 20000;
   var JPEG_WIDTH = 960;
-  var REQUEST_TIMEOUT_MS = 8000;
+  var REQUEST_TIMEOUT_MS = 12000;
   // A translation arrives 1-2 s after its line, so keep it readable for a while even if the
   // game has already hidden the original; a newer translation replaces it at once
   var MIN_SHOW_MS = 3000;          // never hide sooner than this
@@ -56,7 +59,9 @@
     model: null,
     lastError: '',
     lastReply: '',
-    emptyReads: 0
+    emptyReads: 0,
+    cooldownUntil: 0,       // no requests before this time (quota cooldown)
+    quotaHits: 0            // 429 answers within one request, across the model chain
   };
 
   var work = document.createElement('canvas');
@@ -205,7 +210,8 @@
           { inline_data: { mime_type: 'image/jpeg', data: base64 } }
         ]
       }],
-      generationConfig: { temperature: 0.2, maxOutputTokens: 256 }
+      // Room for the answer even when a model thinks before answering
+      generationConfig: { temperature: 0.2, maxOutputTokens: 1024 }
     };
     var model = getModel();
     if (!state.noThinkingConfig[model]) body.generationConfig.thinkingConfig = { thinkingBudget: 0 };
@@ -240,6 +246,17 @@
         return text;
       }
       var message = (r.json && r.json.error && r.json.error.message) || ('HTTP ' + r.status);
+      if (r.status === 429) {
+        state.quotaHits++;
+        // Every model is out of quota: stop asking for a while instead of burning the next minute too
+        if (state.quotaHits >= MODEL_CHAIN.length || attempt >= MODEL_CHAIN.length - 1) {
+          var retry = /retry in ([\d.]+)s/i.exec(message);
+          var waitMs = retry ? Math.max(5000, Math.ceil(parseFloat(retry[1]) * 1000)) : QUOTA_COOLDOWN_MS;
+          state.cooldownUntil = Date.now() + waitMs;
+          state.lastError = 'Gemini kotası doldu (429), ' + Math.round(waitMs / 1000) + ' sn bekleniyor';
+          return null;
+        }
+      }
       // A generic 400 is usually the thinking setting this model does not accept: retry without it
       if (r.status === 400 && !/api key/i.test(message) && !state.noThinkingConfig[model]) {
         state.noThinkingConfig[model] = true;
@@ -434,6 +451,8 @@
   function send(imageData, sig) {
     state.inFlight = true;
     state.lastRequestAt = Date.now();
+    state.quotaHits = 0;
+    var previousSig = state.lastSentSig;
     state.lastSentSig = sig;
     state.requests++;
     refreshStatus();
@@ -441,11 +460,16 @@
     var base64 = makeJpegBase64(imageData);
     translate(base64).then(function (text) {
       state.lastLatencyMs = Date.now() - started;
-      if (text === null) return;
+      if (text === null) {
+        // Failed (quota, timeout, network): forget this line, so it is sent again on the next read
+        if (state.lastSentSig === sig) state.lastSentSig = previousSig;
+        return;
+      }
       state.lastReply = text;
       if (!text || text === '-' || text === '—') hideSubtitleWhenRead();
       else showSubtitle(text);
     }).catch(function (err) {
+      if (state.lastSentSig === sig) state.lastSentSig = previousSig;
       state.lastError = String(err && err.message || err).slice(0, 120);
     }).then(function () {
       state.inFlight = false;
@@ -479,7 +503,7 @@
 
       var isNew = diff(sig, state.lastSentSig) > NEW_TEXT_DIFF;
 
-      var gapOk = Date.now() - state.lastRequestAt >= MIN_REQUEST_GAP_MS;
+      var gapOk = Date.now() - state.lastRequestAt >= MIN_REQUEST_GAP_MS && Date.now() >= state.cooldownUntil;
       if (isNew && state.stableCount >= 1 && !state.inFlight && gapOk && getKey()) {
         send(imageData, sig);
       } else {
@@ -514,8 +538,8 @@
     var audioBackend = setting('#selectAudioBackend', 'EMSS') === 'Disabled' ? 'Disabled' : 'WebAudio';
     var jitter = 0;
     try { jitter = parseInt($('#jitterSlider').val()) || 0; } catch (e) {}
-    // A deeper sound buffer for the PS5 (Wi-Fi and the busy main thread made 100 ms choppy)
-    jitter = Math.max(jitter, 200);
+    // A slightly deeper sound buffer for the PS5 (100 ms was choppy over Wi-Fi; 200 ms adds delay)
+    jitter = Math.max(jitter, 120);
     if (audioBackend === 'WebAudio' && typeof startAudioScheduler === 'function') startAudioScheduler();
     window.vtPs5Streaming = true;
     window.vtFirstFrameSeen = false;
@@ -526,7 +550,7 @@
     sendMessage('startRequest', [
       host, 0, res[0], res[1], fps, String(bitrateKbps), '00000000000000000000000000000000', '0',
       '7.1.431.-1', '', '', 1,
-      switchOn('#framePacingSwitch'), 0, 0, switchOn('#rumbleFeedbackSwitch'), 0, 0, 0,
+      0 /* no frame pacing: it holds frames back and adds delay */, 0, 0, switchOn('#rumbleFeedbackSwitch'), 0, 0, 0,
       audioBackend, 'Stereo', switchOn('#audioSyncSwitch'), jitter, 0, 0,
       'H264', 0, 0, switchOn('#gameModeSwitch'), 1, switchOn('#performanceStatsSwitch')
     ]);
@@ -581,7 +605,7 @@
     wrap.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,0.88);display:flex;align-items:center;justify-content:center;';
     wrap.innerHTML =
       '<div style="background:#1e2230;color:#fff;padding:28px 40px;border-radius:12px;width:70%;max-height:90vh;display:flex;flex-direction:column;font:24px sans-serif;">' +
-      '<div style="font-size:32px;margin-bottom:10px;">PS5 Türkçe çeviri — ayarlar (v34)</div>' +
+      '<div style="font-size:32px;margin-bottom:10px;">PS5 Türkçe çeviri — ayarlar (v35)</div>' +
       '<div id="vt_key_state" style="margin-bottom:8px;color:#9fe;"></div>' +
       '<div id="vt_evren_err" style="margin-bottom:8px;color:#f99;font-size:18px;word-break:break-all;max-height:160px;overflow:auto;"></div>' +
       '<div style="margin-bottom:12px;color:#ccc;font-size:20px;">Yeni anahtar: kutuyu seçip yazın ya da SmartThings\'ten yapıştırın, sonra Enter/Bitti. AIza ya da AQ. ile başlayan anahtar Gemini, diğerleri EVREN olarak saklanır; ikisi de varsa önce EVREN, olmazsa Gemini kullanılır.</div>' +
