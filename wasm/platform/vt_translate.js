@@ -11,9 +11,9 @@
 
   var KEY_STORAGE = 'vt_gemini_key';
   var MODEL_STORAGE = 'vt_gemini_model';
-  var DEFAULT_MODEL = 'gemini-flash-latest';
+  var DEFAULT_MODEL = 'gemini-flash-lite-latest';
   // Tried in order when a model is overloaded (503/429/500) or missing (404)
-  var MODEL_CHAIN = ['gemini-flash-latest', 'gemini-2.5-flash', 'gemini-flash-lite-latest', 'gemini-2.5-flash-lite'];
+  var MODEL_CHAIN = ['gemini-flash-lite-latest', 'gemini-2.5-flash-lite', 'gemini-flash-latest', 'gemini-2.5-flash'];
 
   var GRID_W = 96;            // change-detection grid
   var GRID_H = 16;
@@ -23,7 +23,7 @@
   var NEW_TEXT_DIFF = 0.06;   // above this, the text differs from the last translated one
   var MIN_REQUEST_GAP_MS = 1200;
   var JPEG_WIDTH = 960;
-  var REQUEST_TIMEOUT_MS = 15000;
+  var REQUEST_TIMEOUT_MS = 8000;
 
   var PROMPT =
     'Bu görüntü bir video oyununun ekranının alt kısmıdır. Görüntüdeki oyun altyazısını ya da diyalog metnini oku ' +
@@ -174,7 +174,9 @@
         try { json = JSON.parse(xhr.responseText); } catch (e) { json = { error: { message: 'yanıt okunamadı: ' + String(xhr.responseText).slice(0, 60) } }; }
         resolve({ status: xhr.status, json: json });
       };
-      xhr.ontimeout = function () { reject(new Error('zaman aşımı (' + REQUEST_TIMEOUT_MS / 1000 + ' sn), model: ' + getModel())); };
+      xhr.ontimeout = function () {
+        resolve({ status: 504, json: { error: { message: 'zaman aşımı (' + REQUEST_TIMEOUT_MS / 1000 + ' sn), model: ' + model } } });
+      };
       xhr.onerror = function () { reject(new Error('ağ hatası: Gemini sunucusuna ulaşılamadı (status ' + xhr.status + ')')); };
       xhr.send(JSON.stringify(body));
     }).then(function (r) {
@@ -183,6 +185,7 @@
         var parts = cand && cand.content && cand.content.parts || [];
         var text = parts.map(function (p) { return p.text || ''; }).join('').trim();
         state.lastError = '';
+        try { localStorage.setItem(MODEL_STORAGE, model); } catch (e) {}
         return text;
       }
       var message = (r.json && r.json.error && r.json.error.message) || ('HTTP ' + r.status);
@@ -191,7 +194,7 @@
         state.noThinkingConfig[model] = true;
         return translate(base64, attempt);
       }
-      if ([400, 404, 429, 500, 503].indexOf(r.status) >= 0 && !/api key/i.test(message) && attempt < MODEL_CHAIN.length - 1) {
+      if ([400, 404, 429, 500, 503, 504].indexOf(r.status) >= 0 && !/api key/i.test(message) && attempt < MODEL_CHAIN.length - 1) {
         // Move to the next model and keep it for later requests while it works
         var idx = MODEL_CHAIN.indexOf(getModel());
         state.model = MODEL_CHAIN[(idx + 1) % MODEL_CHAIN.length];
@@ -277,7 +280,7 @@
     wrap.innerHTML =
       '<div style="background:#1e2230;color:#fff;padding:36px 44px;border-radius:12px;width:60%;font:26px sans-serif;">' +
       '<div style="font-size:34px;margin-bottom:14px;">PS5 Türkçe çeviri</div>' +
-      '<div style="margin-bottom:18px;color:#ccc;">Gemini API anahtarınızı girin. Kumandanın Tamam tuşuyla kutuyu seçip klavyeyle yazabilir ya da telefondaki SmartThings uygulamasından yapıştırabilirsiniz. Anahtar tamamlanınca bu pencere kendiliğinden kapanır. Atlamak için Geri. Anahtarı sonra değiştirmek için ana ekranda kumandanın YEŞİL tuşuna (ya da klavyede F2) basın. (v8)</div>' +
+      '<div style="margin-bottom:18px;color:#ccc;">Gemini API anahtarınızı girin. Kumandanın Tamam tuşuyla kutuyu seçip klavyeyle yazabilir ya da telefondaki SmartThings uygulamasından yapıştırabilirsiniz. Anahtar tamamlanınca bu pencere kendiliğinden kapanır. Atlamak için Geri. Anahtarı sonra değiştirmek için ana ekranda kumandanın YEŞİL tuşuna (ya da klavyede F2) basın. (v9)</div>' +
       '<input id="vt_key_input" type="text" autocomplete="off" style="width:100%;font:26px monospace;padding:12px;border-radius:6px;border:2px solid #7CFC00;background:#11131a;color:#fff;" placeholder="AIza...">' +
       '<div id="vt_key_msg" style="margin-top:12px;color:#ffb347;"></div>' +
       '</div>';
