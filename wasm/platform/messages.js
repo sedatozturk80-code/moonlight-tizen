@@ -337,8 +337,13 @@ function handleMessage(msg) {
     if (window.vtPs5Streaming) {
       window.vtPs5Streaming = false;
       isInGame = false;
-      showHostsMode();
-      if (window.Views && Views.Hosts) Navigation.change(Views.Hosts);
+      try {
+        showHostsMode();
+        $('#host-grid').show();
+        if (window.Views && Views.Hosts) Navigation.change(Views.Hosts);
+      } catch (e) {
+        console.error('[messages.js] Failed to return to the host list after the PS5 stream: ' + e);
+      }
       return;
     }
     // Check if there is a normal termination and if the Quit App After switch is checked

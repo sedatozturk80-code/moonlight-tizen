@@ -545,7 +545,7 @@
     wrap.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,0.88);display:flex;align-items:center;justify-content:center;';
     wrap.innerHTML =
       '<div style="background:#1e2230;color:#fff;padding:28px 40px;border-radius:12px;width:70%;max-height:90vh;display:flex;flex-direction:column;font:24px sans-serif;">' +
-      '<div style="font-size:32px;margin-bottom:10px;">PS5 Türkçe çeviri — ayarlar (v22)</div>' +
+      '<div style="font-size:32px;margin-bottom:10px;">PS5 Türkçe çeviri — ayarlar (v23)</div>' +
       '<div id="vt_key_state" style="margin-bottom:8px;color:#9fe;"></div>' +
       '<div id="vt_evren_err" style="margin-bottom:8px;color:#f99;font-size:18px;word-break:break-all;max-height:160px;overflow:auto;"></div>' +
       '<div style="margin-bottom:12px;color:#ccc;font-size:20px;">Yeni anahtar: kutuyu seçip yazın ya da SmartThings\'ten yapıştırın, sonra Enter/Bitti. AIza ile başlayan anahtar Gemini, diğerleri EVREN olarak saklanır; ikisi de varsa önce EVREN, olmazsa Gemini kullanılır.</div>' +
@@ -750,9 +750,12 @@
   var F2_KEY = 113;
   window.addEventListener('keydown', function (e) {
     if (e.keyCode !== GREEN_KEY && e.keyCode !== F2_KEY) return;
-    var video = el('wasm_module');
-    var streaming = video && video.style.display !== 'none';
+    // isInGame is Moonlight's own stream flag; the video element's visibility is not
+    // reliable after a PS5 stream has ended
+    var streaming = (typeof isInGame !== 'undefined') ? isInGame === true : false;
     if (streaming || el('vt_key_dialog')) return;
+    var video = el('wasm_module');
+    if (video) video.style.display = 'none';
     e.preventDefault();
     e.stopImmediatePropagation();
     showKeyDialog(true);
