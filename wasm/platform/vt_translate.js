@@ -108,9 +108,9 @@
   function getEvrenKey() {
     try { return localStorage.getItem(EVREN_KEY_STORAGE) || ''; } catch (e) { return ''; }
   }
-  // EVREN is used whenever its key is set; Gemini otherwise
+  // EVREN is tried first whenever its key is set; Gemini is kept as the fallback
   function getProvider() { return getEvrenKey() ? 'evren' : 'gemini'; }
-  function getKey() { return getProvider() === 'evren' ? getEvrenKey() : getGeminiKey(); }
+  function getKey() { return getEvrenKey() || getGeminiKey(); }
 
   function getModel() {
     if (state.model) return state.model;
@@ -349,8 +349,20 @@
     });
   }
 
+  // Both keys are kept. EVREN goes first when its key is set; if it fails and a Gemini key is
+  // set, the same picture goes to Gemini. With only one key, only that service is used.
   function translate(base64) {
-    return getProvider() === 'evren' ? translateEvren(base64) : translateGemini(base64, 0);
+    var hasEvren = !!getEvrenKey();
+    var hasGemini = !!getGeminiKey();
+    if (!hasEvren) return translateGemini(base64, 0);
+    return translateEvren(base64).then(function (text) {
+      if (text !== null || !hasGemini) return text;
+      var evrenError = state.lastError;
+      return translateGemini(base64, 0).then(function (g) {
+        if (g !== null) state.lastError = 'EVREN olmadı, Gemini kullanıldı (' + evrenError.slice(0, 60) + ')';
+        return g;
+      });
+    });
   }
 
   function send(imageData, sig) {
@@ -423,8 +435,8 @@
     wrap.innerHTML =
       '<div style="background:#1e2230;color:#fff;padding:36px 44px;border-radius:12px;width:60%;font:26px sans-serif;">' +
       '<div style="font-size:34px;margin-bottom:14px;">PS5 Türkçe çeviri</div>' +
-      '<div style="margin-bottom:10px;color:#9fe;">EVREN anahtarı girerseniz çeviri EVREN ile yapılır (veriler Türkiye\'de kalır). AIza ile başlayan bir anahtar Gemini anahtarıdır.</div>' +
-      '<div style="margin-bottom:18px;color:#ccc;">EVREN ya da Gemini API anahtarınızı girin. Kumandanın Tamam tuşuyla kutuyu seçip klavyeyle yazabilir ya da telefondaki SmartThings uygulamasından yapıştırabilirsiniz. Anahtar tamamlanınca bu pencere kendiliğinden kapanır. Atlamak için Geri. Anahtarı sonra değiştirmek için ana ekranda kumandanın YEŞİL tuşuna (ya da klavyede F2) basın. (v11)</div>' +
+      '<div style="margin-bottom:10px;color:#9fe;">İki anahtarı da kaydedebilirsiniz: AIza ile başlayan anahtar Gemini, diğerleri EVREN olarak saklanır. İkisi de varsa önce EVREN denenir, olmazsa Gemini kullanılır. İkinci anahtar için ana ekranda YEŞİL tuşa basın.</div>' +
+      '<div style="margin-bottom:18px;color:#ccc;">EVREN ya da Gemini API anahtarınızı girin. Kumandanın Tamam tuşuyla kutuyu seçip klavyeyle yazabilir ya da telefondaki SmartThings uygulamasından yapıştırabilirsiniz. Anahtar tamamlanınca bu pencere kendiliğinden kapanır. Atlamak için Geri. Anahtarı sonra değiştirmek için ana ekranda kumandanın YEŞİL tuşuna (ya da klavyede F2) basın. (v12)</div>' +
       '<input id="vt_key_input" type="text" autocomplete="off" style="width:100%;font:26px monospace;padding:12px;border-radius:6px;border:2px solid #7CFC00;background:#11131a;color:#fff;" placeholder="AIza...">' +
       '<div id="vt_key_msg" style="margin-top:12px;color:#ffb347;"></div>' +
       '</div>';
