@@ -283,6 +283,11 @@ var handlePromiseMessage = function(callbackId, type, msg) {
  */
 function handleMessage(msg) {
   console.log('%c[messages.js, handleMessage]', 'color: gray;', 'Message data: ', msg);
+  // PS5 direct-connection tests (ps5probe.cpp)
+  if (msg.indexOf('VT_PS5: ') === 0) {
+    if (window.vtOnPs5Message) window.vtOnPs5Message(msg.substring(8));
+    return;
+  }
   // If it's a recognized event, notify the appropriate function
   if (msg.indexOf('streamTerminated: ') === 0) {
     // Close the Stream Menu if it is open

@@ -760,4 +760,5 @@ EMSCRIPTEN_BINDINGS(handle_message) {
   emscripten::function("stun", &stun);
   emscripten::function("pair", &pair);
   emscripten::function("wakeOnLan", &wakeOnLan);
+  emscripten::function("ps5Discover", &ps5Discover);
 }

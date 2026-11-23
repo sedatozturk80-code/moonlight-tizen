@@ -471,6 +471,15 @@
   };
 
   // One-time API key prompt, shown on the app's first screen (not during a stream)
+  // Results of the PS5 tests from ps5probe.cpp
+  window.vtOnPs5Message = function (text) {
+    var out = el('vt_ps5_out');
+    if (out) {
+      out.textContent += (out.textContent ? '\n' : '') + text;
+      out.scrollTop = out.scrollHeight;
+    }
+  };
+
   function escapeHtml(t) {
     return String(t).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; });
   }
@@ -487,12 +496,14 @@
     wrap.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,0.88);display:flex;align-items:center;justify-content:center;';
     wrap.innerHTML =
       '<div style="background:#1e2230;color:#fff;padding:28px 40px;border-radius:12px;width:70%;max-height:90vh;display:flex;flex-direction:column;font:24px sans-serif;">' +
-      '<div style="font-size:32px;margin-bottom:10px;">PS5 Türkçe çeviri — ayarlar (v14)</div>' +
+      '<div style="font-size:32px;margin-bottom:10px;">PS5 Türkçe çeviri — ayarlar (v15)</div>' +
       '<div id="vt_key_state" style="margin-bottom:8px;color:#9fe;"></div>' +
       '<div id="vt_evren_err" style="margin-bottom:8px;color:#f99;font-size:18px;word-break:break-all;max-height:160px;overflow:auto;"></div>' +
       '<div style="margin-bottom:12px;color:#ccc;font-size:20px;">Yeni anahtar: kutuyu seçip yazın ya da SmartThings\'ten yapıştırın, sonra Enter/Bitti. AIza ile başlayan anahtar Gemini, diğerleri EVREN olarak saklanır; ikisi de varsa önce EVREN, olmazsa Gemini kullanılır.</div>' +
       '<input id="vt_key_input" type="text" autocomplete="off" style="width:100%;box-sizing:border-box;font:24px monospace;padding:10px;border-radius:6px;border:2px solid #7CFC00;background:#11131a;color:#fff;" placeholder="EVREN ya da Gemini anahtarı">' +
       '<div id="vt_key_msg" style="margin-top:8px;color:#ffb347;min-height:28px;"></div>' +
+      '<div style="margin-top:4px;font-size:20px;color:#fd6;">PS5 testi: <b>SARI</b> tuş (klavyede F3) PS5\'i ağda arar. Kutuya PS5\'in IP adresini yazarsanız (ör. 192.168.8.20) doğrudan ona sorar.</div>' +
+      '<pre id="vt_ps5_out" style="margin:6px 0 0;font:18px monospace;color:#fd6;white-space:pre-wrap;max-height:180px;overflow:auto;"></pre>' +
       '<div style="margin-top:6px;font-size:20px;color:#ccc;">EVREN modelleri — Aşağı ok ile listeye inin. <b>Tamam</b> = okuma modeli (görüntüyü okur), <b>Sağ</b> = çeviri modeli (OCR metnini çevirir), <b>Sol</b> = seçimi kaldır, <b>Geri</b> = kapat.</div>' +
       '<div id="vt_model_list" style="margin-top:8px;overflow:auto;flex:1;min-height:120px;border:1px solid #333;border-radius:6px;"></div>' +
       '</div>';
@@ -603,6 +614,13 @@
       var inList = sel >= 0;
       if (code === 10009 || code === 27) {
         close();
+      } else if (code === 405 || code === 114) {
+        // Yellow key / F3: look for the PS5 on the network
+        var typed = (input.value || '').trim();
+        var ip = /^\d{1,3}(\.\d{1,3}){3}$/.test(typed) ? typed : '';
+        el('vt_ps5_out').textContent = '';
+        if (typeof Module !== 'undefined' && Module.ps5Discover) Module.ps5Discover(ip);
+        else el('vt_ps5_out').textContent = 'Uygulama modülü henüz yüklenmedi, birkaç saniye sonra tekrar deneyin.';
       } else if (!inList) {
         if (DONE_KEYS.indexOf(code) >= 0) {
           if (!trySave(true) && document.activeElement !== input) input.focus();

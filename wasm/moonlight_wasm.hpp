@@ -340,6 +340,8 @@ EM_BOOL handleWheel(int eventType, const EmscriptenWheelEvent* keyEvent, void* u
 EM_BOOL handlePointerLockChange(int eventType, const EmscriptenPointerlockChangeEvent *pointerlockChangeEvent, void *userData);
 EM_BOOL handlePointerLockError(int eventType, const void *reserved, void *userData);
 
+void ps5Discover(std::string ip);
+
 void VideoTextureStart();
 void VideoTextureStop();
 
