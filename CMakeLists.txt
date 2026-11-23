@@ -266,6 +266,7 @@ add_executable(moonlight-wasm
     wasm/wasmplayer.cpp
     wasm/vtexture.cpp
     wasm/ps5probe.cpp
+    wasm/ps5stream.cpp
 )
 target_include_directories(moonlight-wasm PUBLIC
     wasm

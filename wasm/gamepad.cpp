@@ -408,7 +408,7 @@ void MoonlightInstance::PollGamepads() {
     }
 
     // On failure leave un-announced; next poll will retry
-    if (LiSendControllerArrivalEvent(i, activeGamepadMask, type, buttons, capabilities) == 0) {
+    if (Ps5Mode() || LiSendControllerArrivalEvent(i, activeGamepadMask, type, buttons, capabilities) == 0) {
       slotState[i].announced = true;
     }
   }
@@ -536,9 +536,14 @@ void MoonlightInstance::PollGamepads() {
       }
     } else {
       // If mouse emulation is inactive, then send gamepad input to the desired handler (acts as a gamepad)
-      LiSendMultiControllerEvent(
-        gamepadID, activeGamepadMask, buttonFlags, leftTrigger,
-        rightTrigger, leftStickX, leftStickY, rightStickX, rightStickY);
+      if (Ps5Mode()) {
+        Ps5SendController(gamepadID, buttonFlags, leftTrigger, rightTrigger,
+          leftStickX, leftStickY, rightStickX, rightStickY);
+      } else {
+        LiSendMultiControllerEvent(
+          gamepadID, activeGamepadMask, buttonFlags, leftTrigger,
+          rightTrigger, leftStickX, leftStickY, rightStickX, rightStickY);
+      }
     }
   }
 }

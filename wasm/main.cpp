@@ -137,7 +137,11 @@ void* MoonlightInstance::StopThreadFunc(void* context) {
   }
 
   // Stop the connection
-  LiStopConnection();
+  if (Ps5Mode()) {
+    Ps5Stop();
+  } else {
+    LiStopConnection();
+  }
 
   // Close the media source to prepare for the next stream
   g_Instance->CloseMediaSource();
@@ -263,8 +267,17 @@ void* MoonlightInstance::ConnectionThreadFunc(void* context) {
     PostToJs("Selecting the audio renderer capabilities to: CAPABILITY_DIRECT_SUBMIT");
   }
 
-  err = LiStartConnection(&serverInfo, &me->m_StreamConfig, &MoonlightInstance::s_ClCallbacks,
-    &MoonlightInstance::s_DrCallbacks, &MoonlightInstance::s_ArCallbacks, NULL, 0, NULL, 0);
+  if (Ps5IsHost(me->m_Host)) {
+    // Direct PS5 Remote Play: chiaki-ng feeds the same decoders (ps5stream.cpp)
+    err = Ps5ConnectionRun(me->m_Host, me->m_StreamConfig.width, me->m_StreamConfig.height, me->m_StreamConfig.fps);
+    if (err != 0) {
+      // Leave PS5 mode, so the next stream (or a PC stream) starts clean
+      Ps5Stop();
+    }
+  } else {
+    err = LiStartConnection(&serverInfo, &me->m_StreamConfig, &MoonlightInstance::s_ClCallbacks,
+      &MoonlightInstance::s_DrCallbacks, &MoonlightInstance::s_ArCallbacks, NULL, 0, NULL, 0);
+  }
   if (err != 0) {
     // If the connection failed on its own, no stop thread will be started to tear it down,
     // so close the media source here. Otherwise it stays attached and the next stream can't

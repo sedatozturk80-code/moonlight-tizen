@@ -474,6 +474,35 @@
   };
 
   // One-time API key prompt, shown on the app's first screen (not during a stream)
+  // Starts a direct PS5 stream through Moonlight's normal stream path (ps5stream.cpp)
+  window.vtStartPs5Stream = function () {
+    var reg = null;
+    try { reg = JSON.parse(lsGet(PS5_REGIST_STORAGE) || 'null'); } catch (e) {}
+    var ip = (reg && reg.ip) || lsGet(PS5_IP_STORAGE);
+    var account = lsGet(PS5_ACCOUNT_STORAGE) || '';
+    if (!reg || !ip) return;
+    var host = 'PS5:' + ip + '|' + reg.regist_key + '|' + reg.rp_key + '|' + account;
+    var setting = function (sel, fallback) { try { var v = $(sel).data('value'); return v === undefined ? fallback : v.toString(); } catch (e) { return fallback; } };
+    var switchOn = function (id) { try { return $(id).parent().hasClass('is-checked') ? 1 : 0; } catch (e) { return 0; } };
+    var res = setting('#selectResolution', '1920:1080').split(':');
+    var fps = setting('#selectFramerate', '60');
+    var audioBackend = setting('#selectAudioBackend', 'EMSS');
+    var jitter = 0;
+    try { jitter = parseInt($('#jitterSlider').val()) || 0; } catch (e) {}
+    if (typeof isWebAudioBackendSelected === 'function' && isWebAudioBackendSelected() && typeof startAudioScheduler === 'function') startAudioScheduler();
+    window.vtPs5Streaming = true;
+    $('#connection-warnings, #performance-stats').css('background', 'transparent').text('');
+    $('#loadingSpinnerMessage').text('PS5\'e bağlanılıyor...');
+    showStreamMode();
+    sendMessage('startRequest', [
+      host, 0, res[0], res[1], fps, '15000', '00000000000000000000000000000000', '0',
+      '7.1.431.-1', '', '', 1,
+      switchOn('#framePacingSwitch'), 0, 0, switchOn('#rumbleFeedbackSwitch'), 0, 0, 0,
+      audioBackend, 'Stereo', switchOn('#audioSyncSwitch'), jitter, 0, 0,
+      'H264', 0, 0, switchOn('#gameModeSwitch'), 1, switchOn('#performanceStatsSwitch')
+    ]);
+  };
+
   // Results of the PS5 tests from ps5probe.cpp
   window.vtOnPs5Message = function (text) {
     // Remember the PS5's address from either discovery test
@@ -516,13 +545,13 @@
     wrap.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,0.88);display:flex;align-items:center;justify-content:center;';
     wrap.innerHTML =
       '<div style="background:#1e2230;color:#fff;padding:28px 40px;border-radius:12px;width:70%;max-height:90vh;display:flex;flex-direction:column;font:24px sans-serif;">' +
-      '<div style="font-size:32px;margin-bottom:10px;">PS5 Türkçe çeviri — ayarlar (v21)</div>' +
+      '<div style="font-size:32px;margin-bottom:10px;">PS5 Türkçe çeviri — ayarlar (v22)</div>' +
       '<div id="vt_key_state" style="margin-bottom:8px;color:#9fe;"></div>' +
       '<div id="vt_evren_err" style="margin-bottom:8px;color:#f99;font-size:18px;word-break:break-all;max-height:160px;overflow:auto;"></div>' +
       '<div style="margin-bottom:12px;color:#ccc;font-size:20px;">Yeni anahtar: kutuyu seçip yazın ya da SmartThings\'ten yapıştırın, sonra Enter/Bitti. AIza ile başlayan anahtar Gemini, diğerleri EVREN olarak saklanır; ikisi de varsa önce EVREN, olmazsa Gemini kullanılır.</div>' +
       '<input id="vt_key_input" type="text" autocomplete="off" style="width:100%;box-sizing:border-box;font:24px monospace;padding:10px;border-radius:6px;border:2px solid #7CFC00;background:#11131a;color:#fff;" placeholder="EVREN ya da Gemini anahtarı">' +
       '<div id="vt_key_msg" style="margin-top:8px;color:#ffb347;min-height:28px;"></div>' +
-      '<div style="margin-top:4px;font-size:20px;color:#fd6;">PS5 testi: <b>SARI</b> tuş (klavyede F3) PS5\'i ağda arar. Kutuya PS5\'in IP adresini yazarsanız (ör. 192.168.8.20) doğrudan ona sorar. <b>MAVİ</b> tuş (klavyede F4) test 2: chiaki-ng çekirdeğini çalıştırır. <b>KIRMIZI</b> tuş (klavyede F1) test 3: PS5 oturumu açıp görüntü karelerini sayar.<br><b>Eşleştirme:</b> kutuya önce PSN hesap kimliğini (12 karakter, = ile biter) yazıp Enter, sonra PS5\'teki 8 haneli PIN\'i yazıp Enter.</div>' +
+      '<div style="margin-top:4px;font-size:20px;color:#fd6;">PS5 testi: <b>SARI</b> tuş (klavyede F3) PS5\'i ağda arar. Kutuya PS5\'in IP adresini yazarsanız (ör. 192.168.8.20) doğrudan ona sorar. <b>MAVİ</b> tuş (klavyede F4) test 2: chiaki-ng çekirdeğini çalıştırır. <br><b style="color:#f66">KIRMIZI tuş (klavyede F1): PS5\'te OYNA</b> — oyun ekrana gelir, çeviri üstte çalışır. Çıkmak için yayın sırasında KIRMIZI tuş ya da kolda Share+Options+L1+R1.<br><b>Eşleştirme:</b> kutuya önce PSN hesap kimliğini (12 karakter, = ile biter) yazıp Enter, sonra PS5\'teki 8 haneli PIN\'i yazıp Enter.</div>' +
       '<pre id="vt_ps5_out" style="margin:6px 0 0;font:18px monospace;color:#fd6;white-space:pre-wrap;max-height:180px;overflow:auto;"></pre>' +
       '<div id="vt_model_head" style="margin-top:6px;font-size:20px;color:#ccc;">EVREN modelleri — Aşağı ok ile listeye inin. <b>Tamam</b> = okuma modeli (görüntüyü okur), <b>Sağ</b> = çeviri modeli (OCR metnini çevirir), <b>Sol</b> = seçimi kaldır, <b>Geri</b> = kapat.</div>' +
       '<div id="vt_model_list" style="margin-top:8px;overflow:auto;flex:1;min-height:120px;border:1px solid #333;border-radius:6px;"></div>' +
@@ -660,15 +689,15 @@
       if (code === 10009 || code === 27) {
         close();
       } else if (code === 403 || code === 112) {
-        // Red key / F1: test 3, start a PS5 session and count video frames
+        // Red key / F1: play on the PS5 (direct Remote Play stream)
         var reg = null;
         try { reg = JSON.parse(lsGet(PS5_REGIST_STORAGE) || 'null'); } catch (err) {}
-        var ip3 = (reg && reg.ip) || lsGet(PS5_IP_STORAGE);
-        el('vt_ps5_out').textContent = '';
-        if (!reg || !ip3) msg.textContent = 'Önce SARI tuşla PS5\'i bulup eşleştirin.';
-        else if (typeof Module !== 'undefined' && Module.ps5StreamTest)
-          Module.ps5StreamTest(ip3, reg.regist_key, reg.rp_key, lsGet(PS5_ACCOUNT_STORAGE), 20);
-        else msg.textContent = 'Uygulama modülü henüz yüklenmedi, birkaç saniye sonra tekrar deneyin.';
+        if (!reg || !(reg.ip || lsGet(PS5_IP_STORAGE))) {
+          msg.textContent = 'Önce PS5\'i eşleştirin (SARI tuşla bulun, sonra hesap kimliği ve PIN).';
+        } else {
+          close();
+          window.vtStartPs5Stream();
+        }
       } else if (code === 405 || code === 114 || code === 406 || code === 115) {
         // Yellow key / F3: look for the PS5 on the network; blue key / F4: chiaki-ng core test
         var typed = (input.value || '').trim();

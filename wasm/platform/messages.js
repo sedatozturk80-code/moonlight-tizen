@@ -284,6 +284,10 @@ var handlePromiseMessage = function(callbackId, type, msg) {
 function handleMessage(msg) {
   console.log('%c[messages.js, handleMessage]', 'color: gray;', 'Message data: ', msg);
   // PS5 direct-connection tests (ps5probe.cpp)
+  if (msg.indexOf('VT_PS5_NOTICE: ') === 0) {
+    snackbarLogLong(msg.substring(15));
+    return;
+  }
   if (msg.indexOf('VT_PS5: ') === 0) {
     if (window.vtOnPs5Message) window.vtOnPs5Message(msg.substring(8));
     return;
@@ -328,6 +332,14 @@ function handleMessage(msg) {
       default:
         snackbarLogLong('Connection terminated');
         break;
+    }
+    // A direct PS5 stream has no PC host to refresh: go back to the host list
+    if (window.vtPs5Streaming) {
+      window.vtPs5Streaming = false;
+      isInGame = false;
+      showHostsMode();
+      if (window.Views && Views.Hosts) Navigation.change(Views.Hosts);
+      return;
     }
     // Check if there is a normal termination and if the Quit App After switch is checked
     if (errorCode === 0 && $('#quitAppAfterSwitch').prop('checked')) {

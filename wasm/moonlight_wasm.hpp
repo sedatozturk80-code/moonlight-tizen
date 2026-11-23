@@ -136,6 +136,7 @@ class MoonlightInstance {
   void OnConnectionStarted(uint32_t error);
   void StopConnection();
   void CancelPendingSetup();
+  bool ConnectionCancelled() const { return m_ConnectionCancelled; }
   void CloseMediaSource();
 
   static uint32_t ProfilerGetPackedMillis();
@@ -341,6 +342,14 @@ EM_BOOL handlePointerLockChange(int eventType, const EmscriptenPointerlockChange
 EM_BOOL handlePointerLockError(int eventType, const void *reserved, void *userData);
 
 void ps5Discover(std::string ip);
+
+// Direct PS5 streaming (ps5stream.cpp)
+bool Ps5IsHost(const std::string& host);
+bool Ps5Mode();
+int Ps5ConnectionRun(const std::string& host, int width, int height, int fps);
+void Ps5Stop();
+void Ps5SendController(int index, int buttonFlags, unsigned char leftTrigger, unsigned char rightTrigger,
+                       short leftStickX, short leftStickY, short rightStickX, short rightStickY);
 void ps5ChiakiTest(std::string ip);
 void ps5Regist(std::string ip, std::string accountB64, int pin);
 void ps5StreamTest(std::string ip, std::string registKeyHex, std::string rpKeyHex, std::string accountB64, int seconds);
