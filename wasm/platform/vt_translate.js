@@ -13,6 +13,8 @@
   var KEY_STORAGE = 'vt_gemini_key';
   var EVREN_KEY_STORAGE = 'vt_evren_key';
   var EVREN_BASE = 'https://evren-llmapi.ssyz.org.tr/v1';
+  var EVREN_READ_STORAGE = 'vt_evren_read_model';   // model that reads the picture (vision or OCR)
+  var EVREN_CHAT_STORAGE = 'vt_evren_chat_model';   // model that translates OCR text
   var MODEL_STORAGE = 'vt_gemini_model';
   var DEFAULT_MODEL = 'gemini-flash-lite-latest';
   // Tried in order when a model is overloaded (503/429/500) or missing (404)
@@ -101,6 +103,10 @@
     if (shownAt && Date.now() - shownAt < showFor) return;
     showSubtitle('');
   }
+
+  function lsGet(k) { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } }
+  function lsSet(k, v) { try { if (v) localStorage.setItem(k, v); else localStorage.removeItem(k); } catch (e) {} }
+  function resetEvrenPicks() { evren.models = null; evren.vision = evren.ocr = evren.chat = ''; }
 
   function getGeminiKey() {
     try { return localStorage.getItem(KEY_STORAGE) || ''; } catch (e) { return ''; }
@@ -288,7 +294,15 @@
         if (m && m.id && !evren.chat && !nonChat.test(task)) evren.chat = String(m.id);
       });
       evren.models = list;
-      if (!evren.vision && !(evren.ocr && evren.chat)) throw new Error('EVREN\'de görüntü okuyabilen model bulunamadı');
+      // The user's own choices from the model list win over the automatic picks
+      var readPick = lsGet(EVREN_READ_STORAGE), chatPick = lsGet(EVREN_CHAT_STORAGE);
+      if (readPick) {
+        var readModel = list.filter(function (m) { return m && m.id === readPick; })[0];
+        if (readModel && String(readModel.task || '').toLowerCase() === 'ocr') { evren.ocr = readPick; evren.vision = ''; }
+        else if (readModel) { evren.vision = readPick; }
+      }
+      if (chatPick && list.some(function (m) { return m && m.id === chatPick; })) evren.chat = chatPick;
+      if (!evren.vision && !(evren.ocr && evren.chat)) throw new Error('EVREN\'de görüntü okuyabilen model bulunamadı; YEŞİL tuşla modelleri açıp seçin');
       return evren;
     }, function (err) { evren.loading = null; throw err; });
     return evren.loading;
@@ -426,25 +440,81 @@
   };
 
   // One-time API key prompt, shown on the app's first screen (not during a stream)
+  function escapeHtml(t) {
+    return String(t).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; });
+  }
+
+  // Settings dialog: API key box plus the EVREN model list.
+  // Remote: OK on the box opens the keyboard; Down moves into the list; in the list
+  // OK = "okuma" (the model that reads the picture), Right = "çeviri" (translates OCR text),
+  // Left = clear that row's choices; Back closes.
   function showKeyDialog(force) {
     if (el('vt_key_dialog')) return;
     if (getKey() && !force) return;
     var wrap = document.createElement('div');
     wrap.id = 'vt_key_dialog';
-    wrap.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,0.85);display:flex;align-items:center;justify-content:center;';
+    wrap.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,0.88);display:flex;align-items:center;justify-content:center;';
     wrap.innerHTML =
-      '<div style="background:#1e2230;color:#fff;padding:36px 44px;border-radius:12px;width:60%;font:26px sans-serif;">' +
-      '<div style="font-size:34px;margin-bottom:14px;">PS5 Türkçe çeviri</div>' +
-      '<div style="margin-bottom:10px;color:#9fe;">İki anahtarı da kaydedebilirsiniz: AIza ile başlayan anahtar Gemini, diğerleri EVREN olarak saklanır. İkisi de varsa önce EVREN denenir, olmazsa Gemini kullanılır. İkinci anahtar için ana ekranda YEŞİL tuşa basın.</div>' +
-      '<div style="margin-bottom:18px;color:#ccc;">EVREN ya da Gemini API anahtarınızı girin. Kumandanın Tamam tuşuyla kutuyu seçip klavyeyle yazabilir ya da telefondaki SmartThings uygulamasından yapıştırabilirsiniz. Anahtar tamamlanınca bu pencere kendiliğinden kapanır. Atlamak için Geri. Anahtarı sonra değiştirmek için ana ekranda kumandanın YEŞİL tuşuna (ya da klavyede F2) basın. (v12)</div>' +
-      '<input id="vt_key_input" type="text" autocomplete="off" style="width:100%;font:26px monospace;padding:12px;border-radius:6px;border:2px solid #7CFC00;background:#11131a;color:#fff;" placeholder="AIza...">' +
-      '<div id="vt_key_msg" style="margin-top:12px;color:#ffb347;"></div>' +
+      '<div style="background:#1e2230;color:#fff;padding:28px 40px;border-radius:12px;width:70%;max-height:90vh;display:flex;flex-direction:column;font:24px sans-serif;">' +
+      '<div style="font-size:32px;margin-bottom:10px;">PS5 Türkçe çeviri — ayarlar (v13)</div>' +
+      '<div id="vt_key_state" style="margin-bottom:8px;color:#9fe;"></div>' +
+      '<div style="margin-bottom:12px;color:#ccc;font-size:20px;">Yeni anahtar: kutuyu seçip yazın ya da SmartThings\'ten yapıştırın, sonra Enter/Bitti. AIza ile başlayan anahtar Gemini, diğerleri EVREN olarak saklanır; ikisi de varsa önce EVREN, olmazsa Gemini kullanılır.</div>' +
+      '<input id="vt_key_input" type="text" autocomplete="off" style="width:100%;box-sizing:border-box;font:24px monospace;padding:10px;border-radius:6px;border:2px solid #7CFC00;background:#11131a;color:#fff;" placeholder="EVREN ya da Gemini anahtarı">' +
+      '<div id="vt_key_msg" style="margin-top:8px;color:#ffb347;min-height:28px;"></div>' +
+      '<div style="margin-top:6px;font-size:20px;color:#ccc;">EVREN modelleri — Aşağı ok ile listeye inin. <b>Tamam</b> = okuma modeli (görüntüyü okur), <b>Sağ</b> = çeviri modeli (OCR metnini çevirir), <b>Sol</b> = seçimi kaldır, <b>Geri</b> = kapat.</div>' +
+      '<div id="vt_model_list" style="margin-top:8px;overflow:auto;flex:1;min-height:120px;border:1px solid #333;border-radius:6px;"></div>' +
       '</div>';
     document.body.appendChild(wrap);
     var input = el('vt_key_input');
-    if (force && getKey()) input.value = getKey();
-    // Show the box empty on a forced open so a different key can be typed or pasted
-    if (force) input.value = '';
+    var listBox = el('vt_model_list');
+    var msg = el('vt_key_msg');
+    var models = [];      // [{id, task}], first row is "Otomatik"
+    var sel = -1;         // -1 = the key box has focus
+
+    function refreshKeyState() {
+      var parts = [];
+      parts.push('EVREN anahtarı: ' + (getEvrenKey() ? 'kayıtlı' : 'yok'));
+      parts.push('Gemini anahtarı: ' + (getGeminiKey() ? 'kayıtlı' : 'yok'));
+      parts.push('okuma: ' + (lsGet(EVREN_READ_STORAGE) || 'otomatik'));
+      parts.push('çeviri: ' + (lsGet(EVREN_CHAT_STORAGE) || 'otomatik'));
+      el('vt_key_state').textContent = parts.join('  |  ');
+    }
+
+    function renderList() {
+      var read = lsGet(EVREN_READ_STORAGE), chat = lsGet(EVREN_CHAT_STORAGE);
+      listBox.innerHTML = models.map(function (m, i) {
+        var tags = '';
+        if (m.id === '') tags = (!read && !chat) ? ' <span style="color:#7CFC00">[seçili]</span>' : '';
+        else {
+          if (m.id === read) tags += ' <span style="color:#7CFC00">[OKUMA]</span>';
+          if (m.id === chat) tags += ' <span style="color:#6cf">[ÇEVİRİ]</span>';
+        }
+        var bg = i === sel ? 'background:#2f6f2f;' : '';
+        return '<div data-i="' + i + '" style="padding:6px 12px;' + bg + '">' +
+          escapeHtml(m.id === '' ? 'Otomatik seçim (önerilen)' : m.id) +
+          (m.task ? ' <span style="color:#999">(' + escapeHtml(m.task) + ')</span>' : '') + tags + '</div>';
+      }).join('');
+      var row = listBox.querySelector('[data-i="' + sel + '"]');
+      if (row && row.scrollIntoView) row.scrollIntoView({ block: 'nearest' });
+      refreshKeyState();
+    }
+
+    function loadModels() {
+      if (!getEvrenKey()) { listBox.innerHTML = '<div style="padding:8px;color:#999">EVREN anahtarı girilince modeller burada listelenir.</div>'; return; }
+      listBox.innerHTML = '<div style="padding:8px;color:#999">EVREN modelleri getiriliyor...</div>';
+      xhrJson('GET', EVREN_BASE + '/models', getEvrenKey()).then(function (r) {
+        if (r.status !== 200) {
+          listBox.innerHTML = '<div style="padding:8px;color:#f88">Modeller alınamadı: ' + escapeHtml(errorText(r)) + '</div>';
+          return;
+        }
+        var data = (r.json && r.json.data) || [];
+        models = [{ id: '', task: '' }].concat(data.filter(function (m) { return m && m.id; }).map(function (m) {
+          return { id: String(m.id), task: String(m.task || '') };
+        }));
+        msg.textContent = (models.length - 1) + ' model bulundu.';
+        renderList();
+      });
+    }
 
     var closed = false;
     function close() {
@@ -453,54 +523,87 @@
       window.removeEventListener('keydown', onKey, true);
       if (wrap.parentNode) wrap.parentNode.removeChild(wrap);
     }
-    // Saves the key if it looks valid; returns true when the dialog was closed
+    // Saves the key if it looks valid. A Gemini key closes the dialog; an EVREN key loads the model list.
     function trySave(showMessage) {
       var value = (input.value || '').trim();
+      if (!value) return false;
       if (value.length < 20) {
-        if (showMessage) el('vt_key_msg').textContent = 'Anahtar çok kısa görünüyor. Kutuyu seçip tekrar yazın.';
+        if (showMessage) msg.textContent = 'Anahtar çok kısa görünüyor. Kutuyu seçip tekrar yazın.';
         return false;
       }
-      try {
-        if (/^AIza/.test(value)) localStorage.setItem(KEY_STORAGE, value);
-        else { localStorage.setItem(EVREN_KEY_STORAGE, value); evren.models = null; evren.vision = evren.ocr = evren.chat = ''; }
-      } catch (err) {}
-      close();
+      input.value = '';
+      if (/^AIza/.test(value)) {
+        lsSet(KEY_STORAGE, value);
+        msg.textContent = 'Gemini anahtarı kaydedildi.';
+        refreshKeyState();
+        if (!getEvrenKey()) close();
+      } else {
+        lsSet(EVREN_KEY_STORAGE, value);
+        resetEvrenPicks();
+        msg.textContent = 'EVREN anahtarı kaydedildi.';
+        loadModels();
+      }
       return true;
     }
+
+    function choose(kind) {
+      var m = models[sel];
+      if (!m) return;
+      if (m.id === '') { lsSet(EVREN_READ_STORAGE, ''); lsSet(EVREN_CHAT_STORAGE, ''); msg.textContent = 'Otomatik seçime dönüldü.'; }
+      else if (kind === 'read') { lsSet(EVREN_READ_STORAGE, m.id); msg.textContent = 'Okuma modeli: ' + m.id; }
+      else if (kind === 'chat') { lsSet(EVREN_CHAT_STORAGE, m.id); msg.textContent = 'Çeviri modeli: ' + m.id; }
+      else {
+        if (lsGet(EVREN_READ_STORAGE) === m.id) lsSet(EVREN_READ_STORAGE, '');
+        if (lsGet(EVREN_CHAT_STORAGE) === m.id) lsSet(EVREN_CHAT_STORAGE, '');
+        msg.textContent = 'Seçim kaldırıldı: ' + m.id;
+      }
+      resetEvrenPicks();
+      renderList();
+    }
+
     // Tizen's on-screen keyboard: "Done" sends 65376, "Cancel" sends 65385
     var DONE_KEYS = [13, 65376];
-    var BACK_KEYS = [10009, 27, 65385];
+    var UP = 38, DOWN = 40, LEFT = 37, RIGHT = 39;
     function onKey(e) {
       if (closed) return;
       var code = e.keyCode;
-      if (DONE_KEYS.indexOf(code) >= 0) {
-        // With the keyboard closed, OK on an empty or short box opens the keyboard again
-        if (!trySave(true) && document.activeElement !== input) input.focus();
-      } else if (BACK_KEYS.indexOf(code) >= 0 && code !== 65385) {
+      var inList = sel >= 0;
+      if (code === 10009 || code === 27) {
         close();
+      } else if (!inList) {
+        if (DONE_KEYS.indexOf(code) >= 0) {
+          if (!trySave(true) && document.activeElement !== input) input.focus();
+        } else if (code === DOWN && models.length) {
+          input.blur();
+          sel = 0;
+          renderList();
+        } else {
+          // Let typing reach the input, but keep the app's own navigation from reacting
+          e.stopImmediatePropagation();
+          return;
+        }
       } else {
-        // Let typing reach the input, but keep the app's own navigation from reacting
-        e.stopImmediatePropagation();
-        return;
+        if (code === DOWN) { sel = Math.min(models.length - 1, sel + 1); renderList(); }
+        else if (code === UP) { sel = sel - 1; renderList(); if (sel < 0) input.focus(); }
+        else if (DONE_KEYS.indexOf(code) >= 0) choose('read');
+        else if (code === RIGHT) choose('chat');
+        else if (code === LEFT) choose('clear');
       }
       e.preventDefault();
       e.stopImmediatePropagation();
     }
     // A complete Gemini key ("AIza" + 35 characters) is saved as soon as it is in the box,
-    // so the dialog closes even if the TV keyboard sends no key event at all
+    // so it works even if the TV keyboard sends no key event at all
     var poll = setInterval(function () {
       if (closed) { clearInterval(poll); return; }
       var value = (input.value || '').trim();
-      if (/^AIza[0-9A-Za-z_\-]{35}$/.test(value)) {  // only Gemini keys have a known shape
-        clearInterval(poll);
-        trySave(false);
-      }
+      if (/^AIza[0-9A-Za-z_\-]{35}$/.test(value)) trySave(false);
     }, 500);
-    // When the keyboard closes the box loses focus or fires change: save then too
     input.addEventListener('change', function () { trySave(false); });
-    input.addEventListener('blur', function () { setTimeout(function () { trySave(false); }, 100); });
     window.addEventListener('keydown', onKey, true);
-    setTimeout(function () { input.focus(); }, 300);
+    refreshKeyState();
+    loadModels();
+    setTimeout(function () { if (!getKey()) input.focus(); }, 300);
   }
 
   window.addEventListener('load', function () { setTimeout(function () { showKeyDialog(false); }, 1500); });
