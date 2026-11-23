@@ -170,6 +170,8 @@ void RequestFrame();
 
 // Reads the subtitle region of the frame that was just drawn and hands it to vt_translate.js
 void ReadBack() {
+  // Reading keeps failing on this TV: stop trying, so the main thread only draws the picture
+  if (s_readErrors >= 5 && s_readOk == 0) return;
   // glGetError reports the oldest error since the last call, which may belong to an earlier
   // GL call (texture binding, drawing), so clear those first to see the read's own result
   for (int i = 0; i < 8 && glGetError() != GL_NO_ERROR; i++) {}

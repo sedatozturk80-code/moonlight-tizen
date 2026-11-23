@@ -545,10 +545,10 @@ int Ps5ConnectionRun(const std::string& host, int width, int height, int fps) {
     return -1;
   }
 
-  // Always 1080p at 60 frames per second. H.264: the PS5's HEVC stream left this TV's
-  // player on a black screen.
+  // 720p at 30 frames per second, H.264: 1080p60 froze the TV while drawing the picture
+  // through the GL texture (720p30 is also what the earlier PS5 tests ran without loss)
   (void)width; (void)height; (void)fps;
-  chiaki_connect_video_profile_preset(&info.video_profile, CHIAKI_VIDEO_RESOLUTION_PRESET_1080p, CHIAKI_VIDEO_FPS_PRESET_60);
+  chiaki_connect_video_profile_preset(&info.video_profile, CHIAKI_VIDEO_RESOLUTION_PRESET_720p, CHIAKI_VIDEO_FPS_PRESET_30);
   info.video_profile.codec = CHIAKI_CODEC_H264;
   int streamWidth = (int)info.video_profile.width;
   int streamHeight = (int)info.video_profile.height;
