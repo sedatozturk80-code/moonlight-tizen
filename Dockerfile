@@ -86,7 +86,7 @@ RUN cmake \
 RUN --mount=type=cache,target=/home/moonlight/.ccache,uid=1000,gid=1000 \
 	--mount=type=cache,target=/home/moonlight/.emscripten_cache,uid=1000,gid=1000 \
 	--mount=type=cache,target=/home/moonlight/.emscripten_ports,uid=1000,gid=1000 \
-	CCACHE_DIR=/home/moonlight/.ccache cmake --build build
+	CCACHE_DIR=/home/moonlight/.ccache cmake --build build -- -k 0
 
 # Copy the remaining frontend files required for packaging the application
 COPY --chown=moonlight res/ ./moonlight-tizen/res/
