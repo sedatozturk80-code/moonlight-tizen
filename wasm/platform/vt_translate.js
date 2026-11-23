@@ -496,7 +496,9 @@
   window.vtStartPs5Stream = function () {
     var reg = null;
     try { reg = JSON.parse(lsGet(PS5_REGIST_STORAGE) || 'null'); } catch (e) {}
-    var ip = (reg && reg.ip) || lsGet(PS5_IP_STORAGE);
+    // The address the last search found wins over the one saved at pairing: the PS5's address
+    // changes (for example after switching to a cable) while its pairing keys stay valid
+    var ip = lsGet(PS5_IP_STORAGE) || (reg && reg.ip);
     var account = lsGet(PS5_ACCOUNT_STORAGE) || '';
     if (!reg || !ip) return;
     var host = 'PS5:' + ip + '|' + reg.regist_key + '|' + reg.rp_key + '|' + account;
@@ -531,7 +533,14 @@
   window.vtOnPs5Message = function (text) {
     // Remember the PS5's address from either discovery test
     var m = /^CEVAP (\d+\.\d+\.\d+\.\d+)/.exec(text) || /\((\d+\.\d+\.\d+\.\d+)\) durum/.exec(text);
-    if (m) lsSet(PS5_IP_STORAGE, m[1]);
+    if (m) {
+      lsSet(PS5_IP_STORAGE, m[1]);
+      // Keep the pairing record on the new address too
+      try {
+        var saved = JSON.parse(lsGet(PS5_REGIST_STORAGE) || 'null');
+        if (saved && saved.ip !== m[1]) { saved.ip = m[1]; lsSet(PS5_REGIST_STORAGE, JSON.stringify(saved)); }
+      } catch (e) {}
+    }
     if (text.indexOf('KAYIT_OK ') === 0) {
       try {
         var reg = JSON.parse(text.substring(9));
@@ -569,7 +578,7 @@
     wrap.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,0.88);display:flex;align-items:center;justify-content:center;';
     wrap.innerHTML =
       '<div style="background:#1e2230;color:#fff;padding:28px 40px;border-radius:12px;width:70%;max-height:90vh;display:flex;flex-direction:column;font:24px sans-serif;">' +
-      '<div style="font-size:32px;margin-bottom:10px;">PS5 Türkçe çeviri — ayarlar (v32)</div>' +
+      '<div style="font-size:32px;margin-bottom:10px;">PS5 Türkçe çeviri — ayarlar (v33)</div>' +
       '<div id="vt_key_state" style="margin-bottom:8px;color:#9fe;"></div>' +
       '<div id="vt_evren_err" style="margin-bottom:8px;color:#f99;font-size:18px;word-break:break-all;max-height:160px;overflow:auto;"></div>' +
       '<div style="margin-bottom:12px;color:#ccc;font-size:20px;">Yeni anahtar: kutuyu seçip yazın ya da SmartThings\'ten yapıştırın, sonra Enter/Bitti. AIza ya da AQ. ile başlayan anahtar Gemini, diğerleri EVREN olarak saklanır; ikisi de varsa önce EVREN, olmazsa Gemini kullanılır.</div>' +
