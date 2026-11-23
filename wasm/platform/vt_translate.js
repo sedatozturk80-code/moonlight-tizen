@@ -545,7 +545,7 @@
     wrap.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,0.88);display:flex;align-items:center;justify-content:center;';
     wrap.innerHTML =
       '<div style="background:#1e2230;color:#fff;padding:28px 40px;border-radius:12px;width:70%;max-height:90vh;display:flex;flex-direction:column;font:24px sans-serif;">' +
-      '<div style="font-size:32px;margin-bottom:10px;">PS5 Türkçe çeviri — ayarlar (v23)</div>' +
+      '<div style="font-size:32px;margin-bottom:10px;">PS5 Türkçe çeviri — ayarlar (v24)</div>' +
       '<div id="vt_key_state" style="margin-bottom:8px;color:#9fe;"></div>' +
       '<div id="vt_evren_err" style="margin-bottom:8px;color:#f99;font-size:18px;word-break:break-all;max-height:160px;overflow:auto;"></div>' +
       '<div style="margin-bottom:12px;color:#ccc;font-size:20px;">Yeni anahtar: kutuyu seçip yazın ya da SmartThings\'ten yapıştırın, sonra Enter/Bitti. AIza ile başlayan anahtar Gemini, diğerleri EVREN olarak saklanır; ikisi de varsa önce EVREN, olmazsa Gemini kullanılır.</div>' +
@@ -743,6 +743,33 @@
   }
 
   window.addEventListener('load', function () { setTimeout(function () { showKeyDialog(false); }, 1500); });
+
+  // A "PS5" card on Moonlight's host list: OK starts the direct PS5 stream, or opens the
+  // settings dialog when the PS5 has not been paired yet
+  function ensurePs5Card() {
+    var grid = el('host-grid');
+    if (!grid || el('ps5Container')) return;
+    var reg = null;
+    try { reg = JSON.parse(lsGet(PS5_REGIST_STORAGE) || 'null'); } catch (e) {}
+    var card = document.createElement('div');
+    card.id = 'ps5Container';
+    card.className = 'host-container mdl-card mdl-shadow--4dp';
+    card.setAttribute('role', 'link');
+    card.setAttribute('tabindex', '0');
+    card.innerHTML =
+      '<div class="mdl-card__title mdl-card--expand" style="display:flex;align-items:center;justify-content:center;font:bold 64px sans-serif;color:#fff;">PS5</div>' +
+      '<div class="host-title mdl-card__title-text">' + escapeHtml(reg ? 'PS5\'te OYNA' : 'PS5 EŞLEŞTİR') + '</div>';
+    card.addEventListener('click', function () {
+      var r = null;
+      try { r = JSON.parse(lsGet(PS5_REGIST_STORAGE) || 'null'); } catch (e) {}
+      if (r && (r.ip || lsGet(PS5_IP_STORAGE))) window.vtStartPs5Stream();
+      else showKeyDialog(true);
+    });
+    var add = el('addHostContainer');
+    if (add && add.parentNode === grid) grid.insertBefore(card, add.nextSibling);
+    else grid.insertBefore(card, grid.firstChild);
+  }
+  setInterval(ensurePs5Card, 1000);
 
   // Green remote key (or F2 on a keyboard) on the app's screens, not during a stream,
   // opens the key dialog again so the key can be changed
