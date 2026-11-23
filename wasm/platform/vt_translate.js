@@ -111,6 +111,11 @@
   function lsSet(k, v) { try { if (v) localStorage.setItem(k, v); else localStorage.removeItem(k); } catch (e) {} }
   function resetEvrenPicks() { evren.models = null; evren.vision = evren.ocr = evren.chat = ''; evren.blockedUntil = 0; }
 
+  // Shows enough of a key to check it was typed right, without showing it all
+  function maskKey(k) {
+    if (!k) return 'yok';
+    return k.slice(0, 4) + '…' + k.slice(-4) + ' (' + k.length + ' karakter)';
+  }
   function getGeminiKey() {
     try { return localStorage.getItem(KEY_STORAGE) || ''; } catch (e) { return ''; }
   }
@@ -545,7 +550,7 @@
     wrap.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,0.88);display:flex;align-items:center;justify-content:center;';
     wrap.innerHTML =
       '<div style="background:#1e2230;color:#fff;padding:28px 40px;border-radius:12px;width:70%;max-height:90vh;display:flex;flex-direction:column;font:24px sans-serif;">' +
-      '<div style="font-size:32px;margin-bottom:10px;">PS5 Türkçe çeviri — ayarlar (v24)</div>' +
+      '<div style="font-size:32px;margin-bottom:10px;">PS5 Türkçe çeviri — ayarlar (v25)</div>' +
       '<div id="vt_key_state" style="margin-bottom:8px;color:#9fe;"></div>' +
       '<div id="vt_evren_err" style="margin-bottom:8px;color:#f99;font-size:18px;word-break:break-all;max-height:160px;overflow:auto;"></div>' +
       '<div style="margin-bottom:12px;color:#ccc;font-size:20px;">Yeni anahtar: kutuyu seçip yazın ya da SmartThings\'ten yapıştırın, sonra Enter/Bitti. AIza ile başlayan anahtar Gemini, diğerleri EVREN olarak saklanır; ikisi de varsa önce EVREN, olmazsa Gemini kullanılır.</div>' +
@@ -565,8 +570,8 @@
 
     function refreshKeyState() {
       var parts = [];
-      parts.push('EVREN anahtarı: ' + (getEvrenKey() ? 'kayıtlı' : 'yok'));
-      parts.push('Gemini anahtarı: ' + (getGeminiKey() ? 'kayıtlı' : 'yok'));
+      parts.push('EVREN: ' + maskKey(getEvrenKey()));
+      parts.push('Gemini: ' + maskKey(getGeminiKey()));
       parts.push('okuma: ' + (lsGet(EVREN_READ_STORAGE) || 'otomatik'));
       parts.push('çeviri: ' + (lsGet(EVREN_CHAT_STORAGE) || 'otomatik'));
       var reg = null;
@@ -623,8 +628,18 @@
     }
     // Saves the key if it looks valid. A Gemini key closes the dialog; an EVREN key loads the model list.
     function trySave(showMessage) {
-      var value = (input.value || '').trim();
+      // Keys never contain spaces; the Turkish on-screen keyboard can give dotless/dotted i
+      var value = (input.value || '').replace(/\s+/g, '').replace(/ı/g, 'i').replace(/İ/g, 'I');
       if (!value) return false;
+      if (/^sil$/i.test(value)) {
+        input.value = '';
+        lsSet(KEY_STORAGE, '');
+        lsSet(EVREN_KEY_STORAGE, '');
+        resetEvrenPicks();
+        msg.textContent = 'Gemini ve EVREN anahtarları silindi.';
+        refreshKeyState();
+        return true;
+      }
       // PS5 pairing: first the PSN account ID (12 characters ending in "="), then the 8-digit PIN
       if (/^[A-Za-z0-9+\/]{11}=$/.test(value)) {
         input.value = '';
@@ -650,15 +665,15 @@
         return false;
       }
       input.value = '';
-      if (/^AIza/.test(value)) {
+      if (/^aiza/i.test(value)) {
         lsSet(KEY_STORAGE, value);
-        msg.textContent = 'Gemini anahtarı kaydedildi.';
+        msg.textContent = 'Gemini anahtarı kaydedildi: ' + maskKey(value) + (value.length !== 39 ? ' — DİKKAT: Gemini anahtarı 39 karakter olur, bu ' + value.length + ' karakter.' : '');
         refreshKeyState();
         if (!getEvrenKey()) close();
       } else {
         lsSet(EVREN_KEY_STORAGE, value);
         resetEvrenPicks();
-        msg.textContent = 'EVREN anahtarı kaydedildi.';
+        msg.textContent = 'EVREN anahtarı kaydedildi: ' + maskKey(value) + '. (Gemini anahtarı AIza ile başlar; yanlışsa kutuya SIL yazıp Enter.)';
         loadModels();
       }
       return true;
@@ -732,10 +747,12 @@
     // so it works even if the TV keyboard sends no key event at all
     var poll = setInterval(function () {
       if (closed) { clearInterval(poll); return; }
-      var value = (input.value || '').trim();
-      if (/^AIza[0-9A-Za-z_\-]{35}$/.test(value)) trySave(false);
+      var value = (input.value || '').replace(/\s+/g, '');
+      if (/^aiza/i.test(value) && value.length >= 39) trySave(false);
     }, 500);
     input.addEventListener('change', function () { trySave(false); });
+    // The TV keyboard's "Done" often only closes the keyboard, which takes the focus away
+    input.addEventListener('blur', function () { if (!closed) trySave(true); });
     window.addEventListener('keydown', onKey, true);
     refreshKeyState();
     loadModels();
