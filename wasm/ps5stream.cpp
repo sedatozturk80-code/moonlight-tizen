@@ -394,8 +394,10 @@ void DiagLoop(int generation) {
              s_connected ? "bağlı" : "bağlanıyor", (unsigned)s_vidIn, (unsigned)s_headers, (unsigned)s_keyframes,
              (unsigned)s_vidSent, (unsigned)s_vidDropped, (unsigned)s_vidRejected, (unsigned)s_audIn);
     std::string msg = std::string("VT_PS5_DIAG: ") + text;
-    snprintf(text, sizeof(text), " | çizilen %u, doku hatası %u (%d), IDR isteği %u",
-             (unsigned)drawn, (unsigned)VideoTextureFillErrors(), VideoTextureLastError(), (unsigned)s_idrRequests);
+    snprintf(text, sizeof(text), " | çizilen %u, doku hatası %u (%d), çizim hatası %u, okunan %u, okuma hatası %u (GL 0x%x), IDR isteği %u",
+             (unsigned)drawn, (unsigned)VideoTextureFillErrors(), VideoTextureLastError(),
+             (unsigned)VideoTextureDrawErrors(), (unsigned)VideoTextureReadOk(), (unsigned)VideoTextureReadErrors(),
+             (unsigned)VideoTextureLastGlError(), (unsigned)s_idrRequests);
     msg += text;
     if (!keyInfo.empty()) msg += " | ilk anahtar: " + keyInfo;
     if (!last.empty()) msg += " | son: " + last;

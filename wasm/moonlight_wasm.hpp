@@ -360,6 +360,10 @@ void ps5StreamTest(std::string ip, std::string registKeyHex, std::string rpKeyHe
 void VideoTextureStart();
 void VideoTextureStop();
 uint32_t VideoTextureDrawnFrames();
+uint32_t VideoTextureReadOk();
+uint32_t VideoTextureReadErrors();
+uint32_t VideoTextureDrawErrors();
+int VideoTextureLastGlError();
 uint32_t VideoTextureFillErrors();
 int VideoTextureLastError();
 

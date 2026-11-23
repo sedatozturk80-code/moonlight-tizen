@@ -290,7 +290,7 @@ function handleMessage(msg) {
   }
   // PS5 stream counters, shown on screen until the first picture is drawn
   if (msg.indexOf('VT_PS5_DIAG: ') === 0) {
-    if (!window.vtFirstFrameSeen) {
+    if (!window.vtFirstReadOk) {
       var diagBox = document.getElementById('vt_info');
       if (diagBox) {
         diagBox.style.display = 'block';
@@ -299,6 +299,9 @@ function handleMessage(msg) {
         if (video) {
           diagText += ' | oynatıcı: ' + (video.paused ? 'duraklatılmış' : 'oynuyor') + ', hazır ' + video.readyState +
             ', süre ' + (video.currentTime || 0).toFixed(1) + (video.error ? ', hata ' + video.error.code : '');
+        }
+        if (typeof _audStats !== 'undefined' && _audStats) {
+          diagText += ' | ses kesintisi ' + (_audStats.underruns || 0) + ', kayıp ses ' + (_audStats.decoderGaps || 0);
         }
         diagBox.textContent = diagText;
       }

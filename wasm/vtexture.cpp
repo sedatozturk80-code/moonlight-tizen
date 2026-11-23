@@ -62,6 +62,10 @@ double s_lastReadMs = 0.0;
 std::atomic<uint32_t> s_drawnFrames{0};
 std::atomic<uint32_t> s_fillErrors{0};
 std::atomic<int> s_lastFillError{0};
+std::atomic<uint32_t> s_readOk{0};
+std::atomic<uint32_t> s_readErrors{0};
+std::atomic<uint32_t> s_drawErrors{0};
+std::atomic<int> s_lastGlError{0};
 uint32_t s_readCount = 0;
 std::vector<uint8_t> s_pixels;
 
@@ -166,15 +170,27 @@ void RequestFrame();
 
 // Reads the subtitle region of the frame that was just drawn and hands it to vt_translate.js
 void ReadBack() {
+  // glGetError reports the oldest error since the last call, which may belong to an earlier
+  // GL call (texture binding, drawing), so clear those first to see the read's own result
+  for (int i = 0; i < 8 && glGetError() != GL_NO_ERROR; i++) {}
   // GL's origin is the bottom-left corner, so rows 0..kRegionHeight are the bottom of the picture
   glReadPixels(0, 0, kCanvasWidth, kRegionHeight, GL_RGBA, GL_UNSIGNED_BYTE, s_pixels.data());
   GLenum err = glGetError();
   s_readCount++;
   if (err != GL_NO_ERROR) {
-    char text[96];
-    snprintf(text, sizeof(text), "VT HATA: kare okunamadi (GL 0x%x)", (unsigned)err);
-    SetInfo(text);
+    // Keep drawing the picture; the error is shown in the PS5 status line
+    s_readErrors++;
+    s_lastGlError = (int)err;
+    if (s_readErrors == 1) {
+      char text[96];
+      snprintf(text, sizeof(text), "VT HATA: kare okunamadi (GL 0x%x), goruntu cizilmeye devam ediyor", (unsigned)err);
+      SetInfo(text);
+    }
     return;
+  }
+  if (s_readOk++ == 0) {
+    // The status line goes back to the translator once a frame could be read
+    EM_ASM({ window.vtFirstReadOk = true; });
   }
   EM_ASM({
     if (window.vtOnSubtitleFrame) {
@@ -198,11 +214,15 @@ void Draw() {
   glActiveTexture(GL_TEXTURE0);
   glBindTexture(GL_TEXTURE_EXTERNAL_OES, s_texture);
   glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+  GLenum drawErr = glGetError();
+  if (drawErr != GL_NO_ERROR) {
+    s_drawErrors++;
+    s_lastGlError = (int)drawErr;
+  }
   s_drawnFrames++;
   if (s_drawnFrames == 1) {
     // The PS5 diagnostics stop replacing the status line once the picture is on screen
     EM_ASM({ window.vtFirstFrameSeen = true; });
-    SetInfo("TR ceviri: goruntu geldi");
   }
 
   double now = emscripten_get_now();
@@ -249,7 +269,11 @@ void StartOnMainThread() {
   }
   ShowCanvas(true);
   SetInfo("TR ceviri: video doku modu basladi, ilk kare bekleniyor...");
-  EM_ASM({ window.vtFirstFrameSeen = false; });
+  EM_ASM({ window.vtFirstFrameSeen = false; window.vtFirstReadOk = false; });
+  s_readOk = 0;
+  s_readErrors = 0;
+  s_drawErrors = 0;
+  s_lastGlError = 0;
   s_running = true;
   s_lastReadMs = 0.0;
   s_drawnFrames = 0;
@@ -275,6 +299,10 @@ void VideoTextureStart() {
 }
 
 uint32_t VideoTextureDrawnFrames() { return s_drawnFrames; }
+uint32_t VideoTextureReadOk() { return s_readOk; }
+uint32_t VideoTextureReadErrors() { return s_readErrors; }
+uint32_t VideoTextureDrawErrors() { return s_drawErrors; }
+int VideoTextureLastGlError() { return s_lastGlError; }
 uint32_t VideoTextureFillErrors() { return s_fillErrors; }
 int VideoTextureLastError() { return s_lastFillError; }
 
