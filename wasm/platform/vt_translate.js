@@ -112,10 +112,21 @@
   function resetEvrenPicks() { evren.models = null; evren.vision = evren.ocr = evren.chat = ''; evren.blockedUntil = 0; }
 
   // Shows enough of a key to check it was typed right, without showing it all
+  // Gemini keys: the old "AIza..." ones and the new "AQ...." auth keys from AI Studio
+  function isGeminiKey(k) { return /^aiza/i.test(k) || /^AQ\./.test(k); }
   function maskKey(k) {
     if (!k) return 'yok';
     return k.slice(0, 4) + '…' + k.slice(-4) + ' (' + k.length + ' karakter)';
   }
+  (function migrateMisfiledGeminiKey() {
+    try {
+      var e = localStorage.getItem(EVREN_KEY_STORAGE) || '';
+      if (e && /^AQ\./.test(e)) {
+        if (!localStorage.getItem(KEY_STORAGE)) localStorage.setItem(KEY_STORAGE, e);
+        localStorage.removeItem(EVREN_KEY_STORAGE);
+      }
+    } catch (err) {}
+  })();
   function getGeminiKey() {
     try { return localStorage.getItem(KEY_STORAGE) || ''; } catch (e) { return ''; }
   }
@@ -200,12 +211,14 @@
     if (!state.noThinkingConfig[model]) body.generationConfig.thinkingConfig = { thinkingBudget: 0 };
 
     var url = 'https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) +
-      ':generateContent?key=' + encodeURIComponent(key);
+      ':generateContent';
     // XMLHttpRequest with a hard timeout, so one stuck request can never block the rest
     return new Promise(function (resolve, reject) {
       var xhr = new XMLHttpRequest();
       xhr.open('POST', url, true);
       xhr.setRequestHeader('Content-Type', 'application/json');
+      // Works for both the old AIza keys and the new AQ. keys
+      xhr.setRequestHeader('x-goog-api-key', key);
       xhr.timeout = REQUEST_TIMEOUT_MS;
       xhr.onload = function () {
         var json = null;
@@ -550,10 +563,10 @@
     wrap.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,0.88);display:flex;align-items:center;justify-content:center;';
     wrap.innerHTML =
       '<div style="background:#1e2230;color:#fff;padding:28px 40px;border-radius:12px;width:70%;max-height:90vh;display:flex;flex-direction:column;font:24px sans-serif;">' +
-      '<div style="font-size:32px;margin-bottom:10px;">PS5 Türkçe çeviri — ayarlar (v25)</div>' +
+      '<div style="font-size:32px;margin-bottom:10px;">PS5 Türkçe çeviri — ayarlar (v26)</div>' +
       '<div id="vt_key_state" style="margin-bottom:8px;color:#9fe;"></div>' +
       '<div id="vt_evren_err" style="margin-bottom:8px;color:#f99;font-size:18px;word-break:break-all;max-height:160px;overflow:auto;"></div>' +
-      '<div style="margin-bottom:12px;color:#ccc;font-size:20px;">Yeni anahtar: kutuyu seçip yazın ya da SmartThings\'ten yapıştırın, sonra Enter/Bitti. AIza ile başlayan anahtar Gemini, diğerleri EVREN olarak saklanır; ikisi de varsa önce EVREN, olmazsa Gemini kullanılır.</div>' +
+      '<div style="margin-bottom:12px;color:#ccc;font-size:20px;">Yeni anahtar: kutuyu seçip yazın ya da SmartThings\'ten yapıştırın, sonra Enter/Bitti. AIza ya da AQ. ile başlayan anahtar Gemini, diğerleri EVREN olarak saklanır; ikisi de varsa önce EVREN, olmazsa Gemini kullanılır.</div>' +
       '<input id="vt_key_input" type="text" autocomplete="off" style="width:100%;box-sizing:border-box;font:24px monospace;padding:10px;border-radius:6px;border:2px solid #7CFC00;background:#11131a;color:#fff;" placeholder="EVREN ya da Gemini anahtarı">' +
       '<div id="vt_key_msg" style="margin-top:8px;color:#ffb347;min-height:28px;"></div>' +
       '<div style="margin-top:4px;font-size:20px;color:#fd6;">PS5 testi: <b>SARI</b> tuş (klavyede F3) PS5\'i ağda arar. Kutuya PS5\'in IP adresini yazarsanız (ör. 192.168.8.20) doğrudan ona sorar. <b>MAVİ</b> tuş (klavyede F4) test 2: chiaki-ng çekirdeğini çalıştırır. <br><b style="color:#f66">KIRMIZI tuş (klavyede F1): PS5\'te OYNA</b> — oyun ekrana gelir, çeviri üstte çalışır. Çıkmak için yayın sırasında KIRMIZI tuş ya da kolda Share+Options+L1+R1.<br><b>Eşleştirme:</b> kutuya önce PSN hesap kimliğini (12 karakter, = ile biter) yazıp Enter, sonra PS5\'teki 8 haneli PIN\'i yazıp Enter.</div>' +
@@ -665,15 +678,15 @@
         return false;
       }
       input.value = '';
-      if (/^aiza/i.test(value)) {
+      if (isGeminiKey(value)) {
         lsSet(KEY_STORAGE, value);
-        msg.textContent = 'Gemini anahtarı kaydedildi: ' + maskKey(value) + (value.length !== 39 ? ' — DİKKAT: Gemini anahtarı 39 karakter olur, bu ' + value.length + ' karakter.' : '');
+        msg.textContent = 'Gemini anahtarı kaydedildi: ' + maskKey(value) + ((/^aiza/i.test(value) && value.length !== 39) ? ' — DİKKAT: AIza ile başlayan Gemini anahtarı 39 karakter olur, bu ' + value.length + ' karakter.' : '');
         refreshKeyState();
         if (!getEvrenKey()) close();
       } else {
         lsSet(EVREN_KEY_STORAGE, value);
         resetEvrenPicks();
-        msg.textContent = 'EVREN anahtarı kaydedildi: ' + maskKey(value) + '. (Gemini anahtarı AIza ile başlar; yanlışsa kutuya SIL yazıp Enter.)';
+        msg.textContent = 'EVREN anahtarı kaydedildi: ' + maskKey(value) + '. (Gemini anahtarı AIza ya da AQ. ile başlar; yanlışsa kutuya SIL yazıp Enter.)';
         loadModels();
       }
       return true;
@@ -748,7 +761,7 @@
     var poll = setInterval(function () {
       if (closed) { clearInterval(poll); return; }
       var value = (input.value || '').replace(/\s+/g, '');
-      if (/^aiza/i.test(value) && value.length >= 39) trySave(false);
+      if ((/^aiza/i.test(value) && value.length >= 39) || (/^AQ\./.test(value) && value.length >= 53)) trySave(false);
     }, 500);
     input.addEventListener('change', function () { trySave(false); });
     // The TV keyboard's "Done" often only closes the keyboard, which takes the focus away
