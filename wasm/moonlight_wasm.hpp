@@ -350,6 +350,7 @@ bool Ps5IsHost(const std::string& host);
 bool Ps5Mode();
 int Ps5ConnectionRun(const std::string& host, int width, int height, int fps);
 void Ps5Stop();
+void Ps5RequestIdr();
 void Ps5SendController(int index, int buttonFlags, unsigned char leftTrigger, unsigned char rightTrigger,
                        short leftStickX, short leftStickY, short rightStickX, short rightStickY);
 void ps5ChiakiTest(std::string ip);
@@ -358,6 +359,9 @@ void ps5StreamTest(std::string ip, std::string registKeyHex, std::string rpKeyHe
 
 void VideoTextureStart();
 void VideoTextureStop();
+uint32_t VideoTextureDrawnFrames();
+uint32_t VideoTextureFillErrors();
+int VideoTextureLastError();
 
 void onConnectionStarted();
 void onConnectionStopped(int errorCode);

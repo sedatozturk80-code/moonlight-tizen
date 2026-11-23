@@ -59,7 +59,9 @@ GLuint s_vbo = 0;
 std::atomic<bool> s_running{false};
 long s_animationFrameId = 0;
 double s_lastReadMs = 0.0;
-uint32_t s_drawnFrames = 0;
+std::atomic<uint32_t> s_drawnFrames{0};
+std::atomic<uint32_t> s_fillErrors{0};
+std::atomic<int> s_lastFillError{0};
 uint32_t s_readCount = 0;
 std::vector<uint8_t> s_pixels;
 
@@ -223,6 +225,8 @@ void RequestFrame() {
         s_running = false;
       } else {
         MoonlightInstance::ClLogMessage("VT: FillTextureWithNextFrame failed (%d), retrying\n", (int)r);
+        s_fillErrors++;
+        s_lastFillError = (int)r;
         s_animationFrameId = emscripten_request_animation_frame(
           [](double, void*) -> EM_BOOL { s_animationFrameId = 0; RequestFrame(); return EM_FALSE; }, nullptr);
       }
@@ -249,6 +253,8 @@ void StartOnMainThread() {
   s_running = true;
   s_lastReadMs = 0.0;
   s_drawnFrames = 0;
+  s_fillErrors = 0;
+  s_lastFillError = 0;
   s_readCount = 0;
   RequestFrame();
 }
@@ -267,6 +273,10 @@ void StopOnMainThread() {
 void VideoTextureStart() {
   emscripten_async_run_in_main_runtime_thread(EM_FUNC_SIG_V, StartOnMainThread);
 }
+
+uint32_t VideoTextureDrawnFrames() { return s_drawnFrames; }
+uint32_t VideoTextureFillErrors() { return s_fillErrors; }
+int VideoTextureLastError() { return s_lastFillError; }
 
 void VideoTextureStop() {
   emscripten_async_run_in_main_runtime_thread(EM_FUNC_SIG_V, StopOnMainThread);

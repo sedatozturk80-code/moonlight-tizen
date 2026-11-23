@@ -171,6 +171,7 @@ uint32_t s_lastIdrRequestMs = 0;
 std::atomic<uint32_t> s_vidIn{0}, s_vidSent{0}, s_vidRejected{0}, s_vidDropped{0}, s_keyframes{0}, s_headers{0};
 std::atomic<uint32_t> s_audIn{0};
 std::atomic<int> s_generation{0};
+std::string s_firstKeyInfo;  // NAL types and SPS profile/level of the first keyframe sent
 
 struct Nal {
   size_t start;    // offset of the start code
@@ -265,9 +266,12 @@ void StoreParamSets(const uint8_t* buf, const std::vector<Nal>& nals) {
   if (!sets.empty()) s_paramSets.swap(sets);
 }
 
+std::atomic<uint32_t> s_idrRequests{0};
+
 void RequestIdr() {
   uint32_t now = LiGetMillis();
   if (s_lastIdrRequestMs && now - s_lastIdrRequestMs < 1000) return;
+  s_idrRequests++;
   s_lastIdrRequestMs = now;
   if (s_sessionActive) chiaki_session_request_idr(&s_session);
 }
@@ -313,6 +317,27 @@ bool VideoCb(uint8_t* buf, size_t size, int32_t framesLost, bool recovered, void
       data = s_keyframeBuf.data();
       length = s_keyframeBuf.size();
     }
+    if (s_keyframes == 0) {
+      // Describe the first keyframe for the diagnostics: NAL types, then the SPS profile and level
+      std::vector<Nal> sent = SplitNals(data, length);
+      std::string info = "NAL";
+      char tmp[32];
+      for (size_t i = 0; i < sent.size() && i < 8; i++) {
+        snprintf(tmp, sizeof(tmp), " %d", data[sent[i].payload] & 0x1f);
+        info += tmp;
+      }
+      for (const Nal& n : sent) {
+        if ((data[n.payload] & 0x1f) == 7 && n.end - n.payload >= 4) {
+          snprintf(tmp, sizeof(tmp), ", SPS %02x%02x%02x", data[n.payload + 1], data[n.payload + 2], data[n.payload + 3]);
+          info += tmp;
+          break;
+        }
+      }
+      snprintf(tmp, sizeof(tmp), ", %u bayt", (unsigned)length);
+      info += tmp;
+      std::lock_guard<std::mutex> lock(s_lastLogMutex);
+      s_firstKeyInfo = info;
+    }
     s_keyframes++;
   }
 
@@ -350,10 +375,18 @@ void DiagLoop(int generation) {
   while (s_generation == generation && !s_stopRequested) {
     std::this_thread::sleep_for(std::chrono::seconds(2));
     if (s_generation != generation || s_stopRequested) break;
-    std::string last;
+    // Until a picture is drawn, keep asking the PS5 for a fresh keyframe: frames appended
+    // before the player was fully running can be lost, and the PS5 sends no keyframe on its own
+    uint32_t drawn = VideoTextureDrawnFrames();
+    if (drawn == 0 && s_connected) {
+      s_lastIdrRequestMs = 0;
+      RequestIdr();
+    }
+    std::string last, keyInfo;
     {
       std::lock_guard<std::mutex> lock(s_lastLogMutex);
       last = s_lastLog;
+      keyInfo = s_firstKeyInfo;
     }
     char text[256];
     snprintf(text, sizeof(text),
@@ -361,6 +394,10 @@ void DiagLoop(int generation) {
              s_connected ? "bağlı" : "bağlanıyor", (unsigned)s_vidIn, (unsigned)s_headers, (unsigned)s_keyframes,
              (unsigned)s_vidSent, (unsigned)s_vidDropped, (unsigned)s_vidRejected, (unsigned)s_audIn);
     std::string msg = std::string("VT_PS5_DIAG: ") + text;
+    snprintf(text, sizeof(text), " | çizilen %u, doku hatası %u (%d), IDR isteği %u",
+             (unsigned)drawn, (unsigned)VideoTextureFillErrors(), VideoTextureLastError(), (unsigned)s_idrRequests);
+    msg += text;
+    if (!keyInfo.empty()) msg += " | ilk anahtar: " + keyInfo;
     if (!last.empty()) msg += " | son: " + last;
     PostAsync(msg);
   }
@@ -431,6 +468,11 @@ int Ps5ConnectionRun(const std::string& host, int width, int height, int fps) {
   s_paramSets.clear();
   s_gotKeyframe = false;
   s_lastIdrRequestMs = 0;
+  s_idrRequests = 0;
+  {
+    std::lock_guard<std::mutex> lock(s_lastLogMutex);
+    s_firstKeyInfo.clear();
+  }
   s_vidIn = 0; s_vidSent = 0; s_vidRejected = 0; s_vidDropped = 0; s_keyframes = 0; s_headers = 0; s_audIn = 0;
   {
     std::lock_guard<std::mutex> lock(s_lastLogMutex);
@@ -568,6 +610,12 @@ int Ps5ConnectionRun(const std::string& host, int width, int height, int fps) {
   s_sessionActive = true;
   std::thread(DiagLoop, ++s_generation).detach();
   return 0;
+}
+
+// Asks the PS5 for a keyframe (Moonlight calls this where it would call LiRequestIdrFrame)
+void Ps5RequestIdr() {
+  s_lastIdrRequestMs = 0;
+  RequestIdr();
 }
 
 // Called by Moonlight's stop thread in place of LiStopConnection

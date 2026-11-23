@@ -121,7 +121,7 @@ void MoonlightInstance::VideoTrackListener::OnTrackOpen() {
   std::unique_lock<std::mutex> lock(m_Instance->m_Mutex);
   m_Instance->m_VideoStarted = true;
   m_Instance->m_EmssVideoStateChanged.notify_all();
-  LiRequestIdrFrame();
+  if (Ps5Mode()) Ps5RequestIdr(); else LiRequestIdrFrame();
   // VT test: start drawing decoded frames from our own GL texture
   VideoTextureStart();
 }
@@ -143,7 +143,7 @@ void MoonlightInstance::DidChangeFocus(bool got_focus) {
   // Request an IDR frame to dump the frame queue that may have
   // built up from the GL pipeline being stalled.
   if (got_focus) {
-    LiRequestIdrFrame();
+    if (Ps5Mode()) Ps5RequestIdr(); else LiRequestIdrFrame();
   }
 }
 

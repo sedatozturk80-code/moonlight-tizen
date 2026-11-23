@@ -294,7 +294,13 @@ function handleMessage(msg) {
       var diagBox = document.getElementById('vt_info');
       if (diagBox) {
         diagBox.style.display = 'block';
-        diagBox.textContent = msg.substring(13);
+        var diagText = msg.substring(13);
+        var video = document.getElementById('wasm_module');
+        if (video) {
+          diagText += ' | oynatıcı: ' + (video.paused ? 'duraklatılmış' : 'oynuyor') + ', hazır ' + video.readyState +
+            ', süre ' + (video.currentTime || 0).toFixed(1) + (video.error ? ', hata ' + video.error.code : '');
+        }
+        diagBox.textContent = diagText;
       }
     }
     return;
