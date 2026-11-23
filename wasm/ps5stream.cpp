@@ -144,11 +144,12 @@ int QueryState(const std::string& ip) {
 
 // --- chiaki callbacks ---
 
-bool IsH264Keyframe(const uint8_t* buf, size_t size) {
+// HEVC keyframe: an IDR/CRA picture or a parameter set (VPS/SPS/PPS) in the frame
+bool IsHevcKeyframe(const uint8_t* buf, size_t size) {
   for (size_t i = 0; i + 4 < size; i++) {
     if (buf[i] == 0 && buf[i + 1] == 0 && buf[i + 2] == 1) {
-      uint8_t type = buf[i + 3] & 0x1f;
-      if (type == 5 || type == 7) return true;
+      uint8_t type = (buf[i + 3] >> 1) & 0x3f;
+      if ((type >= 16 && type <= 21) || (type >= 32 && type <= 34)) return true;
       i += 2;
     }
   }
@@ -170,7 +171,7 @@ bool VideoCb(uint8_t* buf, size_t size, int32_t framesLost, bool recovered, void
   DECODE_UNIT unit;
   memset(&unit, 0, sizeof(unit));
   unit.frameNumber = ++s_frameNumber;
-  unit.frameType = IsH264Keyframe(buf, size) ? FRAME_TYPE_IDR : FRAME_TYPE_PFRAME;
+  unit.frameType = IsHevcKeyframe(buf, size) ? FRAME_TYPE_IDR : FRAME_TYPE_PFRAME;
   unit.receiveTimeMs = LiGetMillis();
   unit.enqueueTimeMs = unit.receiveTimeMs;
   unit.presentationTimeMs = (unsigned int)unit.receiveTimeMs;
@@ -308,13 +309,12 @@ int Ps5ConnectionRun(const std::string& host, int width, int height, int fps) {
     return -1;
   }
 
-  // Pick the PS5 video profile closest to the Moonlight resolution setting
-  ChiakiVideoResolutionPreset preset = CHIAKI_VIDEO_RESOLUTION_PRESET_1080p;
-  if (height <= 540) preset = CHIAKI_VIDEO_RESOLUTION_PRESET_540p;
-  else if (height <= 720) preset = CHIAKI_VIDEO_RESOLUTION_PRESET_720p;
-  ChiakiVideoFPSPreset fpsPreset = fps >= 60 ? CHIAKI_VIDEO_FPS_PRESET_60 : CHIAKI_VIDEO_FPS_PRESET_30;
-  chiaki_connect_video_profile_preset(&info.video_profile, preset, fpsPreset);
-  info.video_profile.codec = CHIAKI_CODEC_H264;
+  // Always 1080p at 60 frames per second with HEVC, which gives a much cleaner picture
+  // than H.264 at the same bitrate (the PS5 and this TV both decode HEVC in hardware)
+  (void)width; (void)height; (void)fps;
+  chiaki_connect_video_profile_preset(&info.video_profile, CHIAKI_VIDEO_RESOLUTION_PRESET_1080p, CHIAKI_VIDEO_FPS_PRESET_60);
+  info.video_profile.codec = CHIAKI_CODEC_H265;
+  info.video_profile.bitrate = 20000;
   int streamWidth = (int)info.video_profile.width;
   int streamHeight = (int)info.video_profile.height;
   int streamFps = (int)info.video_profile.max_fps;
@@ -346,7 +346,7 @@ int Ps5ConnectionRun(const std::string& host, int width, int height, int fps) {
 
   // Video player (same media pipeline as a PC stream)
   PostToJs("ProgressMsg: Görüntü hazırlanıyor...");
-  int r = MoonlightInstance::s_DrCallbacks.setup(VIDEO_FORMAT_H264, streamWidth, streamHeight, streamFps, nullptr, 0);
+  int r = MoonlightInstance::s_DrCallbacks.setup(VIDEO_FORMAT_H265, streamWidth, streamHeight, streamFps, nullptr, 0);
   if (r != 0) {
     MoonlightInstance::s_ArCallbacks.cleanup();
     return r;
