@@ -205,3 +205,112 @@ void ChiakiTestThread(std::string ip) {
 void ps5ChiakiTest(std::string ip) {
   std::thread(ChiakiTestThread, ip).detach();
 }
+
+// PS5 direct connection, test 3a: pair (register) the TV with the PS5.
+// Uses the PSN account ID (base64, 8 bytes) and the 8-digit PIN shown on the PS5
+// under Settings > System > Remote Play > Link Device. On success the keys needed
+// for later sessions are sent to JS as "KAYIT_OK {json}" and stored only on the TV.
+
+#include <chiaki/base64.h>
+#include <chiaki/regist.h>
+
+#include <atomic>
+
+namespace {
+
+std::string Hex(const uint8_t* data, size_t size) {
+  static const char* digits = "0123456789abcdef";
+  std::string out;
+  for (size_t i = 0; i < size; i++) {
+    out += digits[data[i] >> 4];
+    out += digits[data[i] & 0xf];
+  }
+  return out;
+}
+
+std::string JsonString(const char* text, size_t maxLen) {
+  std::string out = "\"";
+  for (size_t i = 0; i < maxLen && text[i]; i++) {
+    unsigned char c = text[i];
+    if (c == '"' || c == '\\') { out += '\\'; out += c; }
+    else if (c < 0x20) out += ' ';
+    else out += c;
+  }
+  return out + "\"";
+}
+
+struct RegistState {
+  std::atomic<int> done{0};
+  std::string ip;
+};
+
+void RegistCallback(ChiakiRegistEvent* event, void* user) {
+  RegistState* state = static_cast<RegistState*>(user);
+  if (event->type == CHIAKI_REGIST_EVENT_TYPE_FINISHED_SUCCESS && event->registered_host) {
+    ChiakiRegisteredHost* h = event->registered_host;
+    std::string json = "{";
+    json += "\"ip\":\"" + state->ip + "\"";
+    json += ",\"target\":" + std::to_string((int)h->target);
+    json += ",\"nickname\":" + JsonString(h->server_nickname, sizeof(h->server_nickname));
+    json += ",\"mac\":\"" + Hex(h->server_mac, sizeof(h->server_mac)) + "\"";
+    json += ",\"regist_key\":\"" + Hex((const uint8_t*)h->rp_regist_key, sizeof(h->rp_regist_key)) + "\"";
+    json += ",\"key_type\":" + std::to_string(h->rp_key_type);
+    json += ",\"rp_key\":\"" + Hex(h->rp_key, sizeof(h->rp_key)) + "\"";
+    json += ",\"console_pin\":" + std::to_string(h->console_pin);
+    json += "}";
+    Report("KAYIT_OK " + json);
+  } else if (event->type == CHIAKI_REGIST_EVENT_TYPE_FINISHED_CANCELED) {
+    Report("Eşleştirme iptal edildi.");
+  } else {
+    Report("Eşleştirme BAŞARISIZ. PIN'in süresi dolmuş olabilir ya da hesap kimliği yanlış olabilir. "
+           "PS5'te yeni PIN alıp tekrar deneyin.");
+  }
+  state->done = 1;
+}
+
+void RegistThread(std::string ip, std::string accountB64, uint32_t pin) {
+  static ChiakiLog log;
+  chiaki_log_init(&log, CHIAKI_LOG_ERROR | CHIAKI_LOG_WARNING | CHIAKI_LOG_INFO, ChiakiLogToJs, nullptr);
+  chiaki_lib_init();
+
+  ChiakiRegistInfo info;
+  memset(&info, 0, sizeof(info));
+  size_t idSize = sizeof(info.psn_account_id);
+  if (chiaki_base64_decode(accountB64.c_str(), accountB64.size(), info.psn_account_id, &idSize) != CHIAKI_ERR_SUCCESS ||
+      idSize != CHIAKI_PSN_ACCOUNT_ID_SIZE) {
+    Report("PSN hesap kimliği çözülemedi (12 karakter olmalı, = ile biter). Tekrar yazın.");
+    return;
+  }
+  const bool broadcast = ip.empty();
+  info.target = CHIAKI_TARGET_PS5_1;
+  info.host = broadcast ? "255.255.255.255" : ip.c_str();
+  info.broadcast = broadcast;
+  info.psn_online_id = nullptr;
+  info.pin = pin;
+  info.console_pin = 0;
+  info.holepunch_info = nullptr;
+  info.rudp = nullptr;
+
+  RegistState state;
+  state.ip = ip;
+  ChiakiRegist regist;
+  Report(std::string("Eşleştiriliyor: ") + info.host + " ...");
+  ChiakiErrorCode err = chiaki_regist_start(&regist, &log, &info, RegistCallback, &state);
+  if (err != CHIAKI_ERR_SUCCESS) {
+    Report(std::string("Eşleştirme başlatılamadı: ") + chiaki_error_string(err));
+    return;
+  }
+  for (int i = 0; i < 600 && !state.done; i++)  // up to 60 s
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  if (!state.done) {
+    Report("Eşleştirme 60 saniyede bitmedi, durduruluyor.");
+    chiaki_regist_stop(&regist);
+  }
+  chiaki_regist_fini(&regist);
+}
+
+}  // namespace
+
+void ps5Regist(std::string ip, std::string accountB64, int pin) {
+  std::thread(RegistThread, ip, accountB64, (uint32_t)pin).detach();
+}

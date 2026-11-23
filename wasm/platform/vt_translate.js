@@ -12,6 +12,9 @@
 
   var KEY_STORAGE = 'vt_gemini_key';
   var EVREN_KEY_STORAGE = 'vt_evren_key';
+  var PS5_IP_STORAGE = 'vt_ps5_ip';
+  var PS5_ACCOUNT_STORAGE = 'vt_ps5_account';
+  var PS5_REGIST_STORAGE = 'vt_ps5_regist';
   var EVREN_BASE = 'https://evren-llmapi.ssyz.org.tr/v1';
   var EVREN_READ_STORAGE = 'vt_evren_read_model';   // model that reads the picture (vision or OCR)
   var EVREN_CHAT_STORAGE = 'vt_evren_chat_model';   // model that translates OCR text
@@ -473,6 +476,19 @@
   // One-time API key prompt, shown on the app's first screen (not during a stream)
   // Results of the PS5 tests from ps5probe.cpp
   window.vtOnPs5Message = function (text) {
+    // Remember the PS5's address from either discovery test
+    var m = /^CEVAP (\d+\.\d+\.\d+\.\d+)/.exec(text) || /\((\d+\.\d+\.\d+\.\d+)\) durum/.exec(text);
+    if (m) lsSet(PS5_IP_STORAGE, m[1]);
+    if (text.indexOf('KAYIT_OK ') === 0) {
+      try {
+        var reg = JSON.parse(text.substring(9));
+        lsSet(PS5_REGIST_STORAGE, JSON.stringify(reg));
+        text = 'EŞLEŞTİRME BAŞARILI: ' + (reg.nickname || 'PS5') + ' (' + (reg.ip || '?') + '). Anahtarlar sadece bu TV\'de saklandı.';
+      } catch (e) {
+        text = 'Eşleştirme cevabı okunamadı: ' + e;
+      }
+      if (window.vtRefreshKeyState) window.vtRefreshKeyState();
+    }
     var out = el('vt_ps5_out');
     if (out) {
       out.textContent += (out.textContent ? '\n' : '') + text;
@@ -496,13 +512,13 @@
     wrap.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,0.88);display:flex;align-items:center;justify-content:center;';
     wrap.innerHTML =
       '<div style="background:#1e2230;color:#fff;padding:28px 40px;border-radius:12px;width:70%;max-height:90vh;display:flex;flex-direction:column;font:24px sans-serif;">' +
-      '<div style="font-size:32px;margin-bottom:10px;">PS5 Türkçe çeviri — ayarlar (v16)</div>' +
+      '<div style="font-size:32px;margin-bottom:10px;">PS5 Türkçe çeviri — ayarlar (v17)</div>' +
       '<div id="vt_key_state" style="margin-bottom:8px;color:#9fe;"></div>' +
       '<div id="vt_evren_err" style="margin-bottom:8px;color:#f99;font-size:18px;word-break:break-all;max-height:160px;overflow:auto;"></div>' +
       '<div style="margin-bottom:12px;color:#ccc;font-size:20px;">Yeni anahtar: kutuyu seçip yazın ya da SmartThings\'ten yapıştırın, sonra Enter/Bitti. AIza ile başlayan anahtar Gemini, diğerleri EVREN olarak saklanır; ikisi de varsa önce EVREN, olmazsa Gemini kullanılır.</div>' +
       '<input id="vt_key_input" type="text" autocomplete="off" style="width:100%;box-sizing:border-box;font:24px monospace;padding:10px;border-radius:6px;border:2px solid #7CFC00;background:#11131a;color:#fff;" placeholder="EVREN ya da Gemini anahtarı">' +
       '<div id="vt_key_msg" style="margin-top:8px;color:#ffb347;min-height:28px;"></div>' +
-      '<div style="margin-top:4px;font-size:20px;color:#fd6;">PS5 testi: <b>SARI</b> tuş (klavyede F3) PS5\'i ağda arar. Kutuya PS5\'in IP adresini yazarsanız (ör. 192.168.8.20) doğrudan ona sorar. <b>MAVİ</b> tuş (klavyede F4) test 2: chiaki-ng çekirdeğini çalıştırır.</div>' +
+      '<div style="margin-top:4px;font-size:20px;color:#fd6;">PS5 testi: <b>SARI</b> tuş (klavyede F3) PS5\'i ağda arar. Kutuya PS5\'in IP adresini yazarsanız (ör. 192.168.8.20) doğrudan ona sorar. <b>MAVİ</b> tuş (klavyede F4) test 2: chiaki-ng çekirdeğini çalıştırır.<br><b>Eşleştirme:</b> kutuya önce PSN hesap kimliğini (12 karakter, = ile biter) yazıp Enter, sonra PS5\'teki 8 haneli PIN\'i yazıp Enter.</div>' +
       '<pre id="vt_ps5_out" style="margin:6px 0 0;font:18px monospace;color:#fd6;white-space:pre-wrap;max-height:180px;overflow:auto;"></pre>' +
       '<div style="margin-top:6px;font-size:20px;color:#ccc;">EVREN modelleri — Aşağı ok ile listeye inin. <b>Tamam</b> = okuma modeli (görüntüyü okur), <b>Sağ</b> = çeviri modeli (OCR metnini çevirir), <b>Sol</b> = seçimi kaldır, <b>Geri</b> = kapat.</div>' +
       '<div id="vt_model_list" style="margin-top:8px;overflow:auto;flex:1;min-height:120px;border:1px solid #333;border-radius:6px;"></div>' +
@@ -520,6 +536,10 @@
       parts.push('Gemini anahtarı: ' + (getGeminiKey() ? 'kayıtlı' : 'yok'));
       parts.push('okuma: ' + (lsGet(EVREN_READ_STORAGE) || 'otomatik'));
       parts.push('çeviri: ' + (lsGet(EVREN_CHAT_STORAGE) || 'otomatik'));
+      var reg = null;
+      try { reg = JSON.parse(lsGet(PS5_REGIST_STORAGE) || 'null'); } catch (e) {}
+      parts.push('PS5: ' + (reg ? 'eşleşti (' + (reg.nickname || reg.ip) + ')' : (lsGet(PS5_ACCOUNT_STORAGE) ? 'hesap kimliği kayıtlı, PIN bekleniyor' : 'eşleşmedi')) +
+                 (lsGet(PS5_IP_STORAGE) ? ' ' + lsGet(PS5_IP_STORAGE) : ''));
       el('vt_key_state').textContent = parts.join('  |  ');
       el('vt_evren_err').textContent = evren.fullError ? ('Son EVREN hatası: ' + evren.fullError) : '';
     }
@@ -560,6 +580,7 @@
       });
     }
 
+    window.vtRefreshKeyState = refreshKeyState;
     var closed = false;
     function close() {
       if (closed) return;
@@ -571,6 +592,25 @@
     function trySave(showMessage) {
       var value = (input.value || '').trim();
       if (!value) return false;
+      // PS5 pairing: first the PSN account ID (12 characters ending in "="), then the 8-digit PIN
+      if (/^[A-Za-z0-9+\/]{11}=$/.test(value)) {
+        input.value = '';
+        lsSet(PS5_ACCOUNT_STORAGE, value);
+        msg.textContent = 'PSN hesap kimliği kaydedildi. Şimdi PS5\'te Ayarlar → Sistem → Uzaktan Oynatma → Cihaz Bağla ekranındaki 8 haneli PIN\'i yazıp Enter\'a basın.';
+        refreshKeyState();
+        return true;
+      }
+      if (/^\d{8}$/.test(value)) {
+        input.value = '';
+        var account = lsGet(PS5_ACCOUNT_STORAGE);
+        if (!account) { msg.textContent = 'Önce PSN hesap kimliğini yazın (12 karakter, = ile biter).'; return true; }
+        el('vt_ps5_out').textContent = '';
+        if (typeof Module !== 'undefined' && Module.ps5Regist) {
+          Module.ps5Regist(lsGet(PS5_IP_STORAGE) || '', account, parseInt(value, 10));
+          msg.textContent = 'PS5 ile eşleştiriliyor, sonuç aşağıda sarı yazıyla çıkacak...';
+        } else msg.textContent = 'Uygulama modülü henüz yüklenmedi, birkaç saniye sonra tekrar deneyin.';
+        return true;
+      }
       if (value.length < 20) {
         if (showMessage) msg.textContent = 'Anahtar çok kısa görünüyor. Kutuyu seçip tekrar yazın.';
         return false;
