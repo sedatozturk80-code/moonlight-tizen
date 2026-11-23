@@ -343,6 +343,7 @@ EM_BOOL handlePointerLockError(int eventType, const void *reserved, void *userDa
 void ps5Discover(std::string ip);
 void ps5ChiakiTest(std::string ip);
 void ps5Regist(std::string ip, std::string accountB64, int pin);
+void ps5StreamTest(std::string ip, std::string registKeyHex, std::string rpKeyHex, std::string accountB64, int seconds);
 
 void VideoTextureStart();
 void VideoTextureStop();

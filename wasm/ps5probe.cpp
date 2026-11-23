@@ -314,3 +314,185 @@ void RegistThread(std::string ip, std::string accountB64, uint32_t pin) {
 void ps5Regist(std::string ip, std::string accountB64, int pin) {
   std::thread(RegistThread, ip, accountB64, (uint32_t)pin).detach();
 }
+
+// PS5 direct connection, test 3b: start a Remote Play session with the keys from
+// pairing and count the video frames the PS5 sends (nothing is shown yet).
+// Wakes the PS5 first if it is in rest mode.
+
+#include <chiaki/session.h>
+
+#include <cstdio>
+#include <cstdlib>
+
+namespace {
+
+bool FromHex(const std::string& hex, uint8_t* out, size_t size) {
+  if (hex.size() != size * 2) return false;
+  for (size_t i = 0; i < size; i++) {
+    unsigned v;
+    if (sscanf(hex.c_str() + i * 2, "%2x", &v) != 1) return false;
+    out[i] = (uint8_t)v;
+  }
+  return true;
+}
+
+struct HostCheck {
+  std::atomic<int> state{-1};
+};
+
+void HostCheckCb(ChiakiDiscoveryHost* host, void* user) {
+  static_cast<HostCheck*>(user)->state = (int)host->state;
+}
+
+// Returns the PS5 state: 1 ready, 2 standby, -1 no answer
+int QueryState(ChiakiLog* log, const std::string& ip) {
+  ChiakiDiscovery discovery;
+  if (chiaki_discovery_init(&discovery, log, AF_INET) != CHIAKI_ERR_SUCCESS) return -1;
+  HostCheck check;
+  ChiakiDiscoveryThread thread;
+  if (chiaki_discovery_thread_start(&thread, &discovery, HostCheckCb, &check) != CHIAKI_ERR_SUCCESS) {
+    chiaki_discovery_fini(&discovery);
+    return -1;
+  }
+  struct sockaddr_in dst;
+  memset(&dst, 0, sizeof(dst));
+  dst.sin_family = AF_INET;
+  dst.sin_port = htons(CHIAKI_DISCOVERY_PORT_PS5);
+  inet_pton(AF_INET, ip.c_str(), &dst.sin_addr);
+  ChiakiDiscoveryPacket packet;
+  memset(&packet, 0, sizeof(packet));
+  packet.cmd = CHIAKI_DISCOVERY_CMD_SRCH;
+  packet.protocol_version = (char*)CHIAKI_DISCOVERY_PROTOCOL_VERSION_PS5;
+  for (int i = 0; i < 4 && check.state < 0; i++) {
+    chiaki_discovery_send(&discovery, &packet, (struct sockaddr*)&dst, sizeof(dst));
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+  }
+  chiaki_discovery_thread_stop(&thread);
+  chiaki_discovery_fini(&discovery);
+  int s = check.state;
+  return s == CHIAKI_DISCOVERY_HOST_STATE_READY ? 1 : s == CHIAKI_DISCOVERY_HOST_STATE_STANDBY ? 2 : -1;
+}
+
+struct StreamStats {
+  std::atomic<int> frames{0};
+  std::atomic<long long> bytes{0};
+  std::atomic<int> lost{0};
+  std::atomic<int> quit{0};
+  std::atomic<int> connected{0};
+};
+
+void StreamEventCb(ChiakiEvent* event, void* user) {
+  StreamStats* st = static_cast<StreamStats*>(user);
+  switch (event->type) {
+    case CHIAKI_EVENT_CONNECTED:
+      st->connected = 1;
+      Report("OTURUM BAĞLANDI.");
+      break;
+    case CHIAKI_EVENT_LOGIN_PIN_REQUEST:
+      Report("PS5 giriş PIN'i istiyor (PS5'te ekran kilidi PIN'i varsa kapatın).");
+      break;
+    case CHIAKI_EVENT_QUIT:
+      st->quit = 1;
+      Report(std::string("Oturum kapandı: ") + chiaki_quit_reason_string(event->quit.reason) +
+             (event->quit.reason_str ? std::string(" — ") + event->quit.reason_str : ""));
+      break;
+    default:
+      break;
+  }
+}
+
+bool StreamVideoCb(uint8_t* buf, size_t size, int32_t framesLost, bool recovered, void* user) {
+  (void)recovered;
+  StreamStats* st = static_cast<StreamStats*>(user);
+  int n = ++st->frames;
+  st->bytes += (long long)size;
+  if (framesLost > 0) st->lost += framesLost;
+  if (n == 1)
+    Report("İLK GÖRÜNTÜ KARESİ geldi: " + std::to_string(size) + " bayt, başı " + Hex(buf, size < 12 ? size : 12));
+  return true;
+}
+
+void StreamThread(std::string ip, std::string registKeyHex, std::string rpKeyHex, std::string accountB64, int seconds) {
+  static ChiakiLog log;
+  chiaki_log_init(&log, CHIAKI_LOG_ERROR | CHIAKI_LOG_WARNING | CHIAKI_LOG_INFO, ChiakiLogToJs, nullptr);
+  chiaki_lib_init();
+
+  ChiakiConnectInfo info;
+  memset(&info, 0, sizeof(info));
+  if (!FromHex(registKeyHex, (uint8_t*)info.regist_key, sizeof(info.regist_key)) ||
+      !FromHex(rpKeyHex, info.morning, sizeof(info.morning))) {
+    Report("Eşleştirme anahtarları okunamadı, yeniden eşleştirin.");
+    return;
+  }
+  size_t idSize = sizeof(info.psn_account_id);
+  chiaki_base64_decode(accountB64.c_str(), accountB64.size(), info.psn_account_id, &idSize);
+
+  Report("TEST 3 başladı: PS5 durumu soruluyor (" + ip + ")");
+  int state = QueryState(&log, ip);
+  if (state == 2) {
+    char keyStr[CHIAKI_SESSION_AUTH_SIZE + 1];
+    memcpy(keyStr, info.regist_key, CHIAKI_SESSION_AUTH_SIZE);
+    keyStr[CHIAKI_SESSION_AUTH_SIZE] = '\0';
+    uint64_t credential = strtoull(keyStr, nullptr, 16);
+    Report("PS5 dinlenme modunda, uyandırılıyor...");
+    chiaki_discovery_wakeup(&log, nullptr, ip.c_str(), credential, true);
+    for (int i = 0; i < 20 && state != 1; i++) {
+      std::this_thread::sleep_for(std::chrono::seconds(2));
+      state = QueryState(&log, ip);
+    }
+    if (state != 1) { Report("PS5 40 saniyede uyanmadı. PS5'i elle açıp tekrar deneyin."); return; }
+    Report("PS5 uyandı.");
+  } else if (state != 1) {
+    Report("PS5 cevap vermedi. Açık mı, IP doğru mu?");
+    return;
+  }
+
+  info.ps5 = true;
+  info.host = ip.c_str();
+  chiaki_connect_video_profile_preset(&info.video_profile, CHIAKI_VIDEO_RESOLUTION_PRESET_1080p, CHIAKI_VIDEO_FPS_PRESET_60);
+  info.video_profile.codec = CHIAKI_CODEC_H264;
+  info.video_profile_auto_downgrade = true;
+  info.enable_keyboard = false;
+  info.enable_dualsense = false;
+  info.audio_video_disabled = CHIAKI_AUDIO_DISABLED;  // video only for this test
+  info.auto_regist = false;
+  info.holepunch_session = nullptr;
+  info.rudp_sock = nullptr;
+  info.packet_loss_max = 0.05;
+  info.enable_idr_on_fec_failure = true;
+
+  static ChiakiSession session;
+  ChiakiErrorCode err = chiaki_session_init(&session, &info, &log);
+  if (err != CHIAKI_ERR_SUCCESS) { Report(std::string("Oturum hazırlanamadı: ") + chiaki_error_string(err)); return; }
+  StreamStats stats;
+  chiaki_session_set_event_cb(&session, StreamEventCb, &stats);
+  chiaki_session_set_video_sample_cb(&session, StreamVideoCb, &stats);
+  err = chiaki_session_start(&session);
+  if (err != CHIAKI_ERR_SUCCESS) {
+    Report(std::string("Oturum başlatılamadı: ") + chiaki_error_string(err));
+    chiaki_session_fini(&session);
+    return;
+  }
+  Report("Oturum başlatıldı, " + std::to_string(seconds) + " saniye görüntü sayılacak...");
+
+  int lastFrames = 0;
+  for (int s = 0; s < seconds && !stats.quit; s++) {
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+    if (s % 3 == 2 && stats.frames > 0) {
+      int f = stats.frames;
+      Report("  " + std::to_string(f) + " kare, son 3 sn: " + std::to_string((f - lastFrames) / 3) + " kare/sn, " +
+             std::to_string(stats.bytes / 1024) + " KB, kayıp " + std::to_string(stats.lost));
+      lastFrames = f;
+    }
+  }
+  chiaki_session_stop(&session);
+  chiaki_session_join(&session);
+  chiaki_session_fini(&session);
+  Report(std::string("TEST 3 bitti: ") + (stats.frames > 0 ? "GÖRÜNTÜ GELİYOR, " + std::to_string(stats.frames) + " kare" : "hiç kare gelmedi") + ".");
+}
+
+}  // namespace
+
+void ps5StreamTest(std::string ip, std::string registKeyHex, std::string rpKeyHex, std::string accountB64, int seconds) {
+  std::thread(StreamThread, ip, registKeyHex, rpKeyHex, accountB64, seconds).detach();
+}

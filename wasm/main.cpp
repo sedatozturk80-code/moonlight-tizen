@@ -763,4 +763,5 @@ EMSCRIPTEN_BINDINGS(handle_message) {
   emscripten::function("ps5Discover", &ps5Discover);
   emscripten::function("ps5ChiakiTest", &ps5ChiakiTest);
   emscripten::function("ps5Regist", &ps5Regist);
+  emscripten::function("ps5StreamTest", &ps5StreamTest);
 }
