@@ -3,13 +3,16 @@
 // vtexture.cpp reads the bottom part of the drawn video frame about once a second and
 // calls window.vtOnSubtitleFrame(pixels, width, height) with a copy of the RGBA pixels
 // (GL row order, bottom row first). This file decides when the subtitle area shows new text, sends that
-// area to Gemini as a small JPEG, and shows the Turkish translation over the picture.
-// The Gemini API key is asked once and kept in this TV's localStorage only.
+// area to EVREN (Türkiye, OpenAI-compatible) or Gemini as a small JPEG, and shows the Turkish
+// translation over the picture. The API key is asked once and kept in this TV's localStorage
+// only; a key starting with "AIza" is a Gemini key, anything else is an EVREN key.
 
 (function () {
   'use strict';
 
   var KEY_STORAGE = 'vt_gemini_key';
+  var EVREN_KEY_STORAGE = 'vt_evren_key';
+  var EVREN_BASE = 'https://evren-llmapi.ssyz.org.tr/v1';
   var MODEL_STORAGE = 'vt_gemini_model';
   var DEFAULT_MODEL = 'gemini-flash-lite-latest';
   // Tried in order when a model is overloaded (503/429/500) or missing (404)
@@ -66,7 +69,7 @@
     else if (state.inFlight) parts.push('çevriliyor... ' + ((Date.now() - state.lastRequestAt) / 1000).toFixed(0) + ' sn');
     else parts.push('hazır');
     if (state.requests) parts.push('istek ' + state.requests + ', son ' + (state.lastLatencyMs / 1000).toFixed(1) + ' sn');
-    parts.push(getModel());
+    parts.push(getProvider() === 'evren' ? (/^EVREN/.test(state.model || '') ? state.model : 'EVREN') : getModel());
     if (state.lastReply) parts.push('yanıt: ' + state.lastReply.replace(/\s+/g, ' ').slice(0, 50));
     if (state.lastError) parts.push('HATA: ' + state.lastError);
     setStatus(parts.join(' | '));
@@ -84,9 +87,15 @@
     box.style.display = 'block';
   }
 
-  function getKey() {
+  function getGeminiKey() {
     try { return localStorage.getItem(KEY_STORAGE) || ''; } catch (e) { return ''; }
   }
+  function getEvrenKey() {
+    try { return localStorage.getItem(EVREN_KEY_STORAGE) || ''; } catch (e) { return ''; }
+  }
+  // EVREN is used whenever its key is set; Gemini otherwise
+  function getProvider() { return getEvrenKey() ? 'evren' : 'gemini'; }
+  function getKey() { return getProvider() === 'evren' ? getEvrenKey() : getGeminiKey(); }
 
   function getModel() {
     if (state.model) return state.model;
@@ -145,9 +154,9 @@
     return jpeg.toDataURL('image/jpeg', 0.85).split(',')[1];
   }
 
-  function translate(base64, attempt) {
+  function translateGemini(base64, attempt) {
     attempt = attempt || 0;
-    var key = getKey();
+    var key = getGeminiKey();
     if (!key) return Promise.resolve(null);
     var body = {
       contents: [{
@@ -192,14 +201,14 @@
       // A generic 400 is usually the thinking setting this model does not accept: retry without it
       if (r.status === 400 && !/api key/i.test(message) && !state.noThinkingConfig[model]) {
         state.noThinkingConfig[model] = true;
-        return translate(base64, attempt);
+        return translateGemini(base64, attempt);
       }
       if ([400, 404, 429, 500, 503, 504].indexOf(r.status) >= 0 && !/api key/i.test(message) && attempt < MODEL_CHAIN.length - 1) {
         // Move to the next model and keep it for later requests while it works
         var idx = MODEL_CHAIN.indexOf(getModel());
         state.model = MODEL_CHAIN[(idx + 1) % MODEL_CHAIN.length];
         state.lastError = 'model değişti: ' + state.model;
-        return translate(base64, attempt + 1);
+        return translateGemini(base64, attempt + 1);
       }
       if (r.status === 400 && /api key/i.test(message)) {
         try { localStorage.removeItem(KEY_STORAGE); } catch (e) {}
@@ -208,6 +217,125 @@
       state.lastError = message.slice(0, 120);
       return null;
     });
+  }
+
+
+  // ---------- EVREN (OpenAI-compatible, data stays in Türkiye) ----------
+
+  var evren = { models: null, vision: '', ocr: '', chat: '', loading: null };
+
+  function xhrJson(method, url, key, body) {
+    return new Promise(function (resolve) {
+      var xhr = new XMLHttpRequest();
+      xhr.open(method, url, true);
+      xhr.setRequestHeader('Authorization', 'Bearer ' + key);
+      if (body) xhr.setRequestHeader('Content-Type', 'application/json');
+      xhr.timeout = REQUEST_TIMEOUT_MS * 2;
+      xhr.onload = function () {
+        var json = null;
+        try { json = JSON.parse(xhr.responseText); } catch (e) { json = { error: { message: 'yanıt okunamadı: ' + String(xhr.responseText).slice(0, 60) } }; }
+        resolve({ status: xhr.status, json: json });
+      };
+      xhr.ontimeout = function () { resolve({ status: 504, json: { error: { message: 'EVREN zaman aşımı' } } }); };
+      xhr.onerror = function () { resolve({ status: 0, json: { error: { message: 'EVREN sunucusuna ulaşılamadı (ağ ya da CORS engeli)' } } }); };
+      xhr.send(body ? JSON.stringify(body) : null);
+    });
+  }
+
+  function errorText(r) {
+    var e = r.json && (r.json.error || r.json.detail);
+    var m = (e && (e.message || e)) || ('HTTP ' + r.status);
+    return String(typeof m === 'string' ? m : JSON.stringify(m)).slice(0, 120);
+  }
+
+  // Picks the models once: a vision chat model if EVREN has one, otherwise its OCR model plus a chat model
+  function evrenModels() {
+    if (evren.models) return Promise.resolve(evren);
+    if (evren.loading) return evren.loading;
+    evren.loading = xhrJson('GET', EVREN_BASE + '/models', getEvrenKey()).then(function (r) {
+      evren.loading = null;
+      if (r.status !== 200) throw new Error('EVREN modeller: ' + errorText(r));
+      var list = (r.json && r.json.data) || [];
+      var nonChat = /^(embedding|embeddings|rerank|ocr|asr|tts|speech|transcription|audio|decision|systemone|score)$/;
+      var visionRe = /(^|[-_\/.])(vl|vision|omni|llava|pixtral|internvl|minicpm-v)([-_\/.]|$)|qwen[0-9.]*-?vl|gemma-?3|llama-?4|mistral-small-3/i;
+      var slowRe = /r1|reason|think|coder|embed|guard/i;
+      list.forEach(function (m) {
+        if (!m || !m.id) return;
+        var task = String(m.task || '').toLowerCase();
+        var id = String(m.id);
+        if (task === 'ocr' && !evren.ocr) evren.ocr = id;
+        if (nonChat.test(task)) return;
+        if (/vision|vlm|multimodal|image/.test(task) || visionRe.test(id)) { if (!evren.vision) evren.vision = id; }
+        if (!slowRe.test(id) && !evren.chat) evren.chat = id;
+      });
+      if (!evren.chat) list.forEach(function (m) {
+        var task = String(m && m.task || '').toLowerCase();
+        if (m && m.id && !evren.chat && !nonChat.test(task)) evren.chat = String(m.id);
+      });
+      evren.models = list;
+      if (!evren.vision && !(evren.ocr && evren.chat)) throw new Error('EVREN\'de görüntü okuyabilen model bulunamadı');
+      return evren;
+    }, function (err) { evren.loading = null; throw err; });
+    return evren.loading;
+  }
+
+  function stripThinking(text) {
+    return String(text || '').replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+  }
+
+  function evrenChat(model, content, maxTokens) {
+    return xhrJson('POST', EVREN_BASE + '/chat/completions', getEvrenKey(), {
+      model: model,
+      messages: [{ role: 'user', content: content }],
+      temperature: 0.2,
+      max_tokens: maxTokens || 300,
+      stream: false
+    }).then(function (r) {
+      if (r.status !== 200) throw new Error(model + ': ' + errorText(r));
+      var c = r.json && r.json.choices && r.json.choices[0];
+      return stripThinking(c && c.message && c.message.content);
+    });
+  }
+
+  var TRANSLATE_PROMPT =
+    'Aşağıdaki metin bir video oyununun ekranından okunmuştur. İçindeki oyun altyazısını ya da diyaloğu doğal, ' +
+    'akıcı Türkçeye çevir. Konuşmacı adı varsa "Ad: metin" biçimini koru ve adı çevirme. Görev çubuğu, saat, ' +
+    'hava durumu, pencere başlığı, düğme ipuçları gibi diyalog olmayan yazıları at. Diyalog yoksa yalnızca - yaz. ' +
+    'Açıklama ekleme, yalnızca çeviriyi yaz.\n\nMetin:\n';
+
+  function translateEvren(base64) {
+    var dataUrl = 'data:image/jpeg;base64,' + base64;
+    return evrenModels().then(function (m) {
+      if (m.vision) {
+        state.model = 'EVREN ' + m.vision;
+        return evrenChat(m.vision, [
+          { type: 'text', text: PROMPT },
+          { type: 'image_url', image_url: { url: dataUrl } }
+        ], 300);
+      }
+      state.model = 'EVREN ' + m.ocr + ' + ' + m.chat;
+      return evrenChat(m.ocr, [
+        { type: 'text', text: 'Görüntüdeki tüm yazıları satır satır, olduğu gibi yaz. Başka bir şey ekleme.' },
+        { type: 'image_url', image_url: { url: dataUrl } }
+      ], 400).then(function (ocrText) {
+        if (!ocrText || !/[A-Za-z]{2}/.test(ocrText)) return '-';
+        return evrenChat(m.chat, TRANSLATE_PROMPT + ocrText, 300);
+      });
+    }).then(function (text) {
+      state.lastError = '';
+      return text;
+    }, function (err) {
+      var message = String(err && err.message || err);
+      if (/401|unauthor|api key|invalid.*key|yetki/i.test(message)) {
+        message += ' (anahtarı ana ekranda YEŞİL tuşla değiştirin)';
+      }
+      state.lastError = message.slice(0, 140);
+      return null;
+    });
+  }
+
+  function translate(base64) {
+    return getProvider() === 'evren' ? translateEvren(base64) : translateGemini(base64, 0);
   }
 
   function send(imageData, sig) {
@@ -280,13 +408,16 @@
     wrap.innerHTML =
       '<div style="background:#1e2230;color:#fff;padding:36px 44px;border-radius:12px;width:60%;font:26px sans-serif;">' +
       '<div style="font-size:34px;margin-bottom:14px;">PS5 Türkçe çeviri</div>' +
-      '<div style="margin-bottom:18px;color:#ccc;">Gemini API anahtarınızı girin. Kumandanın Tamam tuşuyla kutuyu seçip klavyeyle yazabilir ya da telefondaki SmartThings uygulamasından yapıştırabilirsiniz. Anahtar tamamlanınca bu pencere kendiliğinden kapanır. Atlamak için Geri. Anahtarı sonra değiştirmek için ana ekranda kumandanın YEŞİL tuşuna (ya da klavyede F2) basın. (v9)</div>' +
+      '<div style="margin-bottom:10px;color:#9fe;">EVREN anahtarı girerseniz çeviri EVREN ile yapılır (veriler Türkiye\'de kalır). AIza ile başlayan bir anahtar Gemini anahtarıdır.</div>' +
+      '<div style="margin-bottom:18px;color:#ccc;">EVREN ya da Gemini API anahtarınızı girin. Kumandanın Tamam tuşuyla kutuyu seçip klavyeyle yazabilir ya da telefondaki SmartThings uygulamasından yapıştırabilirsiniz. Anahtar tamamlanınca bu pencere kendiliğinden kapanır. Atlamak için Geri. Anahtarı sonra değiştirmek için ana ekranda kumandanın YEŞİL tuşuna (ya da klavyede F2) basın. (v10)</div>' +
       '<input id="vt_key_input" type="text" autocomplete="off" style="width:100%;font:26px monospace;padding:12px;border-radius:6px;border:2px solid #7CFC00;background:#11131a;color:#fff;" placeholder="AIza...">' +
       '<div id="vt_key_msg" style="margin-top:12px;color:#ffb347;"></div>' +
       '</div>';
     document.body.appendChild(wrap);
     var input = el('vt_key_input');
     if (force && getKey()) input.value = getKey();
+    // Show the box empty on a forced open so a different key can be typed or pasted
+    if (force) input.value = '';
 
     var closed = false;
     function close() {
@@ -302,7 +433,10 @@
         if (showMessage) el('vt_key_msg').textContent = 'Anahtar çok kısa görünüyor. Kutuyu seçip tekrar yazın.';
         return false;
       }
-      try { localStorage.setItem(KEY_STORAGE, value); } catch (err) {}
+      try {
+        if (/^AIza/.test(value)) localStorage.setItem(KEY_STORAGE, value);
+        else { localStorage.setItem(EVREN_KEY_STORAGE, value); evren.models = null; evren.vision = evren.ocr = evren.chat = ''; }
+      } catch (err) {}
       close();
       return true;
     }
@@ -330,7 +464,7 @@
     var poll = setInterval(function () {
       if (closed) { clearInterval(poll); return; }
       var value = (input.value || '').trim();
-      if (/^AIza[0-9A-Za-z_\-]{35}$/.test(value)) {
+      if (/^AIza[0-9A-Za-z_\-]{35}$/.test(value)) {  // only Gemini keys have a known shape
         clearInterval(poll);
         trySave(false);
       }
