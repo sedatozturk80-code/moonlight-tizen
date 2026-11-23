@@ -49,7 +49,10 @@ ChiakiControllerState s_pads[4];
 bool s_padUsed[4];
 
 int s_frameNumber = 0;
-std::vector<uint8_t> s_frameCopy;
+
+// Last chiaki warning or error, for the on-screen diagnostics
+std::mutex s_lastLogMutex;
+std::string s_lastLog;
 
 // --- messages to JS, never blocking the calling (network) thread ---
 
@@ -78,6 +81,11 @@ void LogCb(ChiakiLogLevel level, const char* msg, void* user) {
   if (msg[0] == ' ' || (msg[0] >= '0' && msg[0] <= '9')) return;
   // Moonlight's own log goes to the console without blocking
   emscripten_log(EM_LOG_CONSOLE, "chiaki: %s", msg);
+  // The last warning or error is shown in the on-screen diagnostics
+  if (level & (CHIAKI_LOG_ERROR | CHIAKI_LOG_WARNING)) {
+    std::lock_guard<std::mutex> lock(s_lastLogMutex);
+    s_lastLog.assign(msg, strnlen(msg, 120));
+  }
 }
 
 void StartedOnMain(int unused) {
@@ -144,16 +152,124 @@ int QueryState(const std::string& ip) {
 
 // --- chiaki callbacks ---
 
-// H.264 keyframe: an IDR picture or an SPS in the frame
-bool IsH264Keyframe(const uint8_t* buf, size_t size) {
-  for (size_t i = 0; i + 4 < size; i++) {
+// --- H.264 stream preparation for the TV's hardware decoder ---
+//
+// chiaki hands over the stream header (SPS + PPS) as a separate "frame" when the stream
+// starts, and the PS5's IDR frames don't repeat it. The EMSS player gets no codec
+// extradata, so it can only start decoding from a packet that carries SPS + PPS + IDR
+// together: a header-only packet followed by a bare IDR left it on a black screen (and,
+// with the video never starting, the EMSS audio track never played either). So the
+// header is kept here and put in front of every keyframe, and nothing is sent to the
+// player before the first keyframe.
+
+std::vector<uint8_t> s_paramSets;     // SPS + PPS NAL units with start codes
+std::vector<uint8_t> s_keyframeBuf;   // parameter sets + keyframe
+bool s_gotKeyframe = false;
+uint32_t s_lastIdrRequestMs = 0;
+
+// Diagnostics shown on screen until the first picture appears
+std::atomic<uint32_t> s_vidIn{0}, s_vidSent{0}, s_vidRejected{0}, s_vidDropped{0}, s_keyframes{0}, s_headers{0};
+std::atomic<uint32_t> s_audIn{0};
+std::atomic<int> s_generation{0};
+
+struct Nal {
+  size_t start;    // offset of the start code
+  size_t payload;  // offset of the NAL header byte
+  size_t end;      // offset just past the NAL
+};
+
+std::vector<Nal> SplitNals(const uint8_t* buf, size_t size) {
+  std::vector<Nal> nals;
+  size_t i = 0;
+  while (i + 3 <= size) {
     if (buf[i] == 0 && buf[i + 1] == 0 && buf[i + 2] == 1) {
-      uint8_t type = buf[i + 3] & 0x1f;
-      if (type == 5 || type == 7) return true;
-      i += 2;
+      size_t start = (i > 0 && buf[i - 1] == 0) ? i - 1 : i;
+      if (!nals.empty()) nals.back().end = start;
+      nals.push_back({start, i + 3, size});
+      i += 3;
+    } else {
+      i++;
+    }
+  }
+  // Trailing zero bytes (chiaki pads its buffers) are not part of the last NAL
+  if (!nals.empty()) {
+    Nal& last = nals.back();
+    while (last.end > last.payload + 1 && buf[last.end - 1] == 0) last.end--;
+  }
+  return nals;
+}
+
+// Reads one unsigned Exp-Golomb value; false when the data runs out
+bool ReadUe(const uint8_t* data, size_t size, size_t& bit, uint32_t& value) {
+  int zeros = 0;
+  while (true) {
+    if (bit >= size * 8) return false;
+    int b = (data[bit / 8] >> (7 - bit % 8)) & 1;
+    bit++;
+    if (b) break;
+    if (++zeros > 31) return false;
+  }
+  uint32_t v = 0;
+  for (int k = 0; k < zeros; k++) {
+    if (bit >= size * 8) return false;
+    v = (v << 1) | ((data[bit / 8] >> (7 - bit % 8)) & 1);
+    bit++;
+  }
+  value = (1u << zeros) - 1 + v;
+  return true;
+}
+
+// A frame the decoder can start from: an IDR slice, or an I slice in a non-IDR picture
+bool IsKeyframe(const uint8_t* buf, const std::vector<Nal>& nals) {
+  for (const Nal& n : nals) {
+    uint8_t type = buf[n.payload] & 0x1f;
+    if (type == 5) return true;
+    if (type == 1) {
+      size_t bit = 0;
+      uint32_t firstMb = 0, sliceType = 0;
+      const uint8_t* rbsp = buf + n.payload + 1;
+      size_t len = n.end - n.payload - 1;
+      if (ReadUe(rbsp, len, bit, firstMb) && ReadUe(rbsp, len, bit, sliceType))
+        return sliceType % 5 == 2 || sliceType % 5 == 4;  // I or SI
+      return false;
     }
   }
   return false;
+}
+
+bool HasPictureData(const uint8_t* buf, const std::vector<Nal>& nals) {
+  for (const Nal& n : nals) {
+    uint8_t type = buf[n.payload] & 0x1f;
+    if (type >= 1 && type <= 5) return true;
+  }
+  return false;
+}
+
+bool HasSps(const uint8_t* buf, const std::vector<Nal>& nals) {
+  for (const Nal& n : nals)
+    if ((buf[n.payload] & 0x1f) == 7) return true;
+  return false;
+}
+
+// Keeps the SPS and PPS of a header (or of a keyframe that carries its own)
+void StoreParamSets(const uint8_t* buf, const std::vector<Nal>& nals) {
+  std::vector<uint8_t> sets;
+  for (const Nal& n : nals) {
+    uint8_t type = buf[n.payload] & 0x1f;
+    if (type == 7 || type == 8) {
+      static const uint8_t kStartCode[] = {0, 0, 0, 1};
+      sets.insert(sets.end(), kStartCode, kStartCode + 4);
+      sets.insert(sets.end(), buf + n.payload, buf + n.end);
+    }
+  }
+  if (!sets.empty()) s_paramSets.swap(sets);
+}
+
+void RequestIdr() {
+  uint32_t now = LiGetMillis();
+  if (s_lastIdrRequestMs && now - s_lastIdrRequestMs < 1000) return;
+  s_lastIdrRequestMs = now;
+  if (s_sessionActive) chiaki_session_request_idr(&s_session);
 }
 
 bool VideoCb(uint8_t* buf, size_t size, int32_t framesLost, bool recovered, void* user) {
@@ -161,26 +277,93 @@ bool VideoCb(uint8_t* buf, size_t size, int32_t framesLost, bool recovered, void
   (void)recovered;
   (void)user;
   if (s_stopRequested) return true;
+  s_vidIn++;
+
+  std::vector<Nal> nals = SplitNals(buf, size);
+
+  // The stream header (SPS + PPS, no picture): keep it for the next keyframe
+  if (!HasPictureData(buf, nals)) {
+    StoreParamSets(buf, nals);
+    s_headers++;
+    return true;
+  }
+
+  bool key = IsKeyframe(buf, nals);
+  if (key && HasSps(buf, nals)) StoreParamSets(buf, nals);
+
+  // The decoder can't start from a P frame: wait for a keyframe and ask the PS5 for one
+  if (!s_gotKeyframe && !key) {
+    s_vidDropped++;
+    RequestIdr();
+    return false;
+  }
+
+  const uint8_t* data = buf;
+  size_t length = size;
+  if (key) {
+    if (!HasSps(buf, nals)) {
+      if (s_paramSets.empty()) {
+        // No header yet: this keyframe can't be decoded on its own
+        s_vidDropped++;
+        RequestIdr();
+        return false;
+      }
+      s_keyframeBuf.assign(s_paramSets.begin(), s_paramSets.end());
+      s_keyframeBuf.insert(s_keyframeBuf.end(), buf + nals.front().start, buf + size);
+      data = s_keyframeBuf.data();
+      length = s_keyframeBuf.size();
+    }
+    s_keyframes++;
+  }
 
   LENTRY entry;
   entry.next = nullptr;
-  entry.data = reinterpret_cast<char*>(buf);
-  entry.length = (int)size;
+  entry.data = reinterpret_cast<char*>(const_cast<uint8_t*>(data));
+  entry.length = (int)length;
   entry.bufferType = BUFFER_TYPE_PICDATA;
 
   DECODE_UNIT unit;
   memset(&unit, 0, sizeof(unit));
   unit.frameNumber = ++s_frameNumber;
-  unit.frameType = IsH264Keyframe(buf, size) ? FRAME_TYPE_IDR : FRAME_TYPE_PFRAME;
+  unit.frameType = key ? FRAME_TYPE_IDR : FRAME_TYPE_PFRAME;
   unit.receiveTimeMs = LiGetMillis();
   unit.enqueueTimeMs = unit.receiveTimeMs;
   unit.presentationTimeMs = (unsigned int)unit.receiveTimeMs;
-  unit.fullLength = (int)size;
+  unit.fullLength = (int)length;
   unit.bufferList = &entry;
 
   int r = MoonlightInstance::s_DrCallbacks.submitDecodeUnit(&unit);
-  // false asks chiaki to request a new keyframe from the PS5
-  return r == DR_OK;
+  if (r == DR_OK) {
+    s_vidSent++;
+    if (key) s_gotKeyframe = true;
+    return true;
+  }
+  // The player refused the frame: start again from the next keyframe
+  s_vidRejected++;
+  s_gotKeyframe = false;
+  RequestIdr();
+  return false;
+}
+
+// Posts the stream counters every 2 seconds while the session runs
+void DiagLoop(int generation) {
+  while (s_generation == generation && !s_stopRequested) {
+    std::this_thread::sleep_for(std::chrono::seconds(2));
+    if (s_generation != generation || s_stopRequested) break;
+    std::string last;
+    {
+      std::lock_guard<std::mutex> lock(s_lastLogMutex);
+      last = s_lastLog;
+    }
+    char text[256];
+    snprintf(text, sizeof(text),
+             "PS5 %s | görüntü: gelen %u, başlık %u, anahtar %u, ekrana %u, bekletilen %u, reddedilen %u | ses %u",
+             s_connected ? "bağlı" : "bağlanıyor", (unsigned)s_vidIn, (unsigned)s_headers, (unsigned)s_keyframes,
+             (unsigned)s_vidSent, (unsigned)s_vidDropped, (unsigned)s_vidRejected, (unsigned)s_audIn);
+    std::string msg = std::string("VT_PS5_DIAG: ") + text;
+    if (!last.empty()) msg += " | son: " + last;
+    PostAsync(msg);
+  }
 }
 
 void AudioHeaderCb(ChiakiAudioHeader* header, void* user) {
@@ -192,6 +375,7 @@ void AudioHeaderCb(ChiakiAudioHeader* header, void* user) {
 void AudioFrameCb(uint8_t* buf, size_t size, void* user) {
   (void)user;
   if (s_stopRequested) return;
+  s_audIn++;
   MoonlightInstance::s_ArCallbacks.decodeAndPlaySample(reinterpret_cast<char*>(buf), (int)size);
 }
 
@@ -244,6 +428,14 @@ int Ps5ConnectionRun(const std::string& host, int width, int height, int fps) {
   s_stopRequested = false;
   s_connected = false;
   s_frameNumber = 0;
+  s_paramSets.clear();
+  s_gotKeyframe = false;
+  s_lastIdrRequestMs = 0;
+  s_vidIn = 0; s_vidSent = 0; s_vidRejected = 0; s_vidDropped = 0; s_keyframes = 0; s_headers = 0; s_audIn = 0;
+  {
+    std::lock_guard<std::mutex> lock(s_lastLogMutex);
+    s_lastLog.clear();
+  }
   {
     std::lock_guard<std::mutex> lock(s_padMutex);
     for (int i = 0; i < 4; i++) {
@@ -374,12 +566,14 @@ int Ps5ConnectionRun(const std::string& host, int width, int height, int fps) {
     return -1;
   }
   s_sessionActive = true;
+  std::thread(DiagLoop, ++s_generation).detach();
   return 0;
 }
 
 // Called by Moonlight's stop thread in place of LiStopConnection
 void Ps5Stop() {
   s_stopRequested = true;
+  s_generation++;
   std::lock_guard<std::mutex> lock(s_sessionMutex);
   if (s_sessionActive) {
     chiaki_session_stop(&s_session);

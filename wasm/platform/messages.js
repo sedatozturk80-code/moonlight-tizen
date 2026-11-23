@@ -288,6 +288,17 @@ function handleMessage(msg) {
     snackbarLogLong(msg.substring(15));
     return;
   }
+  // PS5 stream counters, shown on screen until the first picture is drawn
+  if (msg.indexOf('VT_PS5_DIAG: ') === 0) {
+    if (!window.vtFirstFrameSeen) {
+      var diagBox = document.getElementById('vt_info');
+      if (diagBox) {
+        diagBox.style.display = 'block';
+        diagBox.textContent = msg.substring(13);
+      }
+    }
+    return;
+  }
   if (msg.indexOf('VT_PS5: ') === 0) {
     if (window.vtOnPs5Message) window.vtOnPs5Message(msg.substring(8));
     return;

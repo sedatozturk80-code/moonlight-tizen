@@ -509,6 +509,7 @@
     try { jitter = parseInt($('#jitterSlider').val()) || 0; } catch (e) {}
     if (typeof isWebAudioBackendSelected === 'function' && isWebAudioBackendSelected() && typeof startAudioScheduler === 'function') startAudioScheduler();
     window.vtPs5Streaming = true;
+    window.vtFirstFrameSeen = false;
     $('#connection-warnings, #performance-stats').css('background', 'transparent').text('');
     $('#loadingSpinnerMessage').text('PS5\'e bağlanılıyor...');
     showStreamMode();
@@ -563,7 +564,7 @@
     wrap.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,0.88);display:flex;align-items:center;justify-content:center;';
     wrap.innerHTML =
       '<div style="background:#1e2230;color:#fff;padding:28px 40px;border-radius:12px;width:70%;max-height:90vh;display:flex;flex-direction:column;font:24px sans-serif;">' +
-      '<div style="font-size:32px;margin-bottom:10px;">PS5 Türkçe çeviri — ayarlar (v28)</div>' +
+      '<div style="font-size:32px;margin-bottom:10px;">PS5 Türkçe çeviri — ayarlar (v29)</div>' +
       '<div id="vt_key_state" style="margin-bottom:8px;color:#9fe;"></div>' +
       '<div id="vt_evren_err" style="margin-bottom:8px;color:#f99;font-size:18px;word-break:break-all;max-height:160px;overflow:auto;"></div>' +
       '<div style="margin-bottom:12px;color:#ccc;font-size:20px;">Yeni anahtar: kutuyu seçip yazın ya da SmartThings\'ten yapıştırın, sonra Enter/Bitti. AIza ya da AQ. ile başlayan anahtar Gemini, diğerleri EVREN olarak saklanır; ikisi de varsa önce EVREN, olmazsa Gemini kullanılır.</div>' +

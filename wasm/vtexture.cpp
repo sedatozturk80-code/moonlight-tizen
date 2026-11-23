@@ -197,6 +197,11 @@ void Draw() {
   glBindTexture(GL_TEXTURE_EXTERNAL_OES, s_texture);
   glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
   s_drawnFrames++;
+  if (s_drawnFrames == 1) {
+    // The PS5 diagnostics stop replacing the status line once the picture is on screen
+    EM_ASM({ window.vtFirstFrameSeen = true; });
+    SetInfo("TR ceviri: goruntu geldi");
+  }
 
   double now = emscripten_get_now();
   if (now - s_lastReadMs >= kReadIntervalMs) {
@@ -240,6 +245,7 @@ void StartOnMainThread() {
   }
   ShowCanvas(true);
   SetInfo("TR ceviri: video doku modu basladi, ilk kare bekleniyor...");
+  EM_ASM({ window.vtFirstFrameSeen = false; });
   s_running = true;
   s_lastReadMs = 0.0;
   s_drawnFrames = 0;
