@@ -101,3 +101,107 @@ void DiscoverThread(std::string ip) {
 void ps5Discover(std::string ip) {
   std::thread(DiscoverThread, ip).detach();
 }
+
+// PS5 direct connection, test 2: the chiaki-ng core running inside the TV app.
+// Checks that the library starts, that its PS5 key exchange crypto works with the
+// TV's OpenSSL, and that chiaki's own discovery (its threads, stop handling and
+// sockets on Tizen) finds the PS5.
+
+#include <chiaki/common.h>
+#include <chiaki/discovery.h>
+#include <chiaki/ecdh.h>
+#include <chiaki/log.h>
+
+#include <chrono>
+
+namespace {
+
+void ChiakiLogToJs(ChiakiLogLevel level, const char* msg, void* user) {
+  (void)user;
+  if (level & (CHIAKI_LOG_ERROR | CHIAKI_LOG_WARNING | CHIAKI_LOG_INFO))
+    Report(std::string("chiaki: ") + msg);
+}
+
+void ChiakiFoundHost(ChiakiDiscoveryHost* host, void* user) {
+  int* found = static_cast<int*>(user);
+  (*found)++;
+  std::string text = "chiaki PS5'i buldu: ";
+  text += host->host_name ? host->host_name : "?";
+  text += " (";
+  text += host->host_addr ? host->host_addr : "?";
+  text += ") durum: ";
+  text += chiaki_discovery_host_state_string(host->state);
+  text += ", sistem ";
+  text += host->system_version ? host->system_version : "?";
+  Report(text);
+}
+
+void ChiakiTestThread(std::string ip) {
+  static ChiakiLog log;
+  chiaki_log_init(&log, CHIAKI_LOG_ERROR | CHIAKI_LOG_WARNING | CHIAKI_LOG_INFO, ChiakiLogToJs, nullptr);
+
+  Report("TEST 2 başladı: chiaki-ng çekirdeği");
+  ChiakiErrorCode err = chiaki_lib_init();
+  Report(std::string("1) kütüphane: ") + chiaki_error_string(err));
+  if (err != CHIAKI_ERR_SUCCESS) return;
+
+  ChiakiECDH ecdh;
+  err = chiaki_ecdh_init(&ecdh);
+  if (err == CHIAKI_ERR_SUCCESS) {
+    uint8_t handshake[16] = {0};
+    uint8_t pub[128];
+    size_t pubSize = sizeof(pub);
+    uint8_t sig[64];
+    size_t sigSize = sizeof(sig);
+    err = chiaki_ecdh_get_local_pub_key(&ecdh, pub, &pubSize, handshake, sig, &sigSize);
+    Report(std::string("2) şifreleme (anahtar değişimi): ") + chiaki_error_string(err) +
+           " — açık anahtar " + std::to_string(pubSize) + " bayt");
+    chiaki_ecdh_fini(&ecdh);
+  } else {
+    Report(std::string("2) şifreleme başlatılamadı: ") + chiaki_error_string(err));
+  }
+
+  ChiakiDiscovery discovery;
+  err = chiaki_discovery_init(&discovery, &log, AF_INET);
+  if (err != CHIAKI_ERR_SUCCESS) {
+    Report(std::string("3) keşif başlatılamadı: ") + chiaki_error_string(err));
+    return;
+  }
+  int found = 0;
+  ChiakiDiscoveryThread thread;
+  err = chiaki_discovery_thread_start(&thread, &discovery, ChiakiFoundHost, &found);
+  if (err != CHIAKI_ERR_SUCCESS) {
+    Report(std::string("3) keşif iş parçacığı açılamadı: ") + chiaki_error_string(err));
+    chiaki_discovery_fini(&discovery);
+    return;
+  }
+
+  struct sockaddr_in dst;
+  memset(&dst, 0, sizeof(dst));
+  dst.sin_family = AF_INET;
+  dst.sin_port = htons(CHIAKI_DISCOVERY_PORT_PS5);
+  inet_pton(AF_INET, ip.empty() ? "255.255.255.255" : ip.c_str(), &dst.sin_addr);
+  ChiakiDiscoveryPacket packet;
+  memset(&packet, 0, sizeof(packet));
+  packet.cmd = CHIAKI_DISCOVERY_CMD_SRCH;
+  packet.protocol_version = (char*)CHIAKI_DISCOVERY_PROTOCOL_VERSION_PS5;
+  for (int i = 0; i < 3 && found == 0; i++) {
+    err = chiaki_discovery_send(&discovery, &packet, (struct sockaddr*)&dst, sizeof(dst));
+    if (err != CHIAKI_ERR_SUCCESS) Report(std::string("3) keşif gönderilemedi: ") + chiaki_error_string(err));
+    std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+  }
+
+  auto t0 = std::chrono::steady_clock::now();
+  chiaki_discovery_thread_stop(&thread);
+  auto stopMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
+  chiaki_discovery_fini(&discovery);
+  Report(std::string("3) keşif: ") + (found ? "başarılı" : "PS5 cevap vermedi") +
+         ", durdurma " + std::to_string(stopMs) + " ms");
+  Report("TEST 2 bitti.");
+}
+
+}  // namespace
+
+void ps5ChiakiTest(std::string ip) {
+  std::thread(ChiakiTestThread, ip).detach();
+}

@@ -341,6 +341,7 @@ EM_BOOL handlePointerLockChange(int eventType, const EmscriptenPointerlockChange
 EM_BOOL handlePointerLockError(int eventType, const void *reserved, void *userData);
 
 void ps5Discover(std::string ip);
+void ps5ChiakiTest(std::string ip);
 
 void VideoTextureStart();
 void VideoTextureStop();

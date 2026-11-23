@@ -69,6 +69,7 @@ COPY --chown=moonlight h264bitstream ./moonlight-tizen/h264bitstream/
 COPY --chown=moonlight libgamestream ./moonlight-tizen/libgamestream/
 COPY --chown=moonlight moonlight-common-c ./moonlight-tizen/moonlight-common-c/
 COPY --chown=moonlight opus ./moonlight-tizen/opus/
+COPY --chown=moonlight chiaki ./moonlight-tizen/chiaki/
 COPY --chown=moonlight ports ./moonlight-tizen/ports/ 
 COPY --chown=moonlight wasm/*.c ./moonlight-tizen/wasm/
 COPY --chown=moonlight wasm/*.cpp ./moonlight-tizen/wasm/

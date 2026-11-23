@@ -229,6 +229,31 @@ target_compile_definitions(opus PUBLIC
      FIXED_POINT
      OPUS_BUILD)
 
+# chiaki-ng core (PS5 Remote Play), LAN only: see chiaki/tizen/remote_stubs.c
+file(GLOB CHIAKI_CORE_SOURCES
+    chiaki/src/*.c
+    chiaki/pb/*.c
+    chiaki/nanopb/*.c
+    chiaki/jerasure/src/*.c
+    chiaki/gf-complete/src/*.c
+    chiaki/tizen/*.c)
+add_library(chiaki-core STATIC ${CHIAKI_CORE_SOURCES})
+target_include_directories(chiaki-core PUBLIC
+    chiaki/include
+    chiaki/pb
+    chiaki/nanopb
+    chiaki/jerasure/include
+    chiaki/gf-complete/include
+    chiaki/src)
+target_compile_definitions(chiaki-core PUBLIC
+    PB_C99_STATIC_ASSERT
+    CHIAKI_NO_REMOTE
+    CHIAKI_TIZEN_WASM)
+set_target_properties(chiaki-core
+    PROPERTIES
+        COMPILE_FLAGS
+            "-std=gnu11 -pthread -s USE_PTHREADS=1 -s USE_CRYPTO=1 -s USE_SSL=1")
+
 add_executable(moonlight-wasm
     wasm/libchelper.c
     wasm/auddec.cpp
@@ -279,6 +304,7 @@ set_target_properties(moonlight-wasm
              -s USE_SSL=1 \
              -s USE_CURL=1")
 target_link_libraries(moonlight-wasm PUBLIC
+    chiaki-core
     libgamestream
     h264bitstream
     opus
