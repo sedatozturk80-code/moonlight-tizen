@@ -491,6 +491,10 @@
     }
     var out = el('vt_ps5_out');
     if (out) {
+      // While a PS5 test runs, give its log most of the window so whole error chains fit
+      out.style.maxHeight = '60vh';
+      out.style.font = '15px monospace';
+      ['vt_model_head', 'vt_model_list'].forEach(function (id) { var e = el(id); if (e) e.style.display = 'none'; });
       out.textContent += (out.textContent ? '\n' : '') + text;
       out.scrollTop = out.scrollHeight;
     }
@@ -512,7 +516,7 @@
     wrap.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,0.88);display:flex;align-items:center;justify-content:center;';
     wrap.innerHTML =
       '<div style="background:#1e2230;color:#fff;padding:28px 40px;border-radius:12px;width:70%;max-height:90vh;display:flex;flex-direction:column;font:24px sans-serif;">' +
-      '<div style="font-size:32px;margin-bottom:10px;">PS5 Türkçe çeviri — ayarlar (v19)</div>' +
+      '<div style="font-size:32px;margin-bottom:10px;">PS5 Türkçe çeviri — ayarlar (v20)</div>' +
       '<div id="vt_key_state" style="margin-bottom:8px;color:#9fe;"></div>' +
       '<div id="vt_evren_err" style="margin-bottom:8px;color:#f99;font-size:18px;word-break:break-all;max-height:160px;overflow:auto;"></div>' +
       '<div style="margin-bottom:12px;color:#ccc;font-size:20px;">Yeni anahtar: kutuyu seçip yazın ya da SmartThings\'ten yapıştırın, sonra Enter/Bitti. AIza ile başlayan anahtar Gemini, diğerleri EVREN olarak saklanır; ikisi de varsa önce EVREN, olmazsa Gemini kullanılır.</div>' +
@@ -520,7 +524,7 @@
       '<div id="vt_key_msg" style="margin-top:8px;color:#ffb347;min-height:28px;"></div>' +
       '<div style="margin-top:4px;font-size:20px;color:#fd6;">PS5 testi: <b>SARI</b> tuş (klavyede F3) PS5\'i ağda arar. Kutuya PS5\'in IP adresini yazarsanız (ör. 192.168.8.20) doğrudan ona sorar. <b>MAVİ</b> tuş (klavyede F4) test 2: chiaki-ng çekirdeğini çalıştırır. <b>KIRMIZI</b> tuş (klavyede F1) test 3: PS5 oturumu açıp görüntü karelerini sayar.<br><b>Eşleştirme:</b> kutuya önce PSN hesap kimliğini (12 karakter, = ile biter) yazıp Enter, sonra PS5\'teki 8 haneli PIN\'i yazıp Enter.</div>' +
       '<pre id="vt_ps5_out" style="margin:6px 0 0;font:18px monospace;color:#fd6;white-space:pre-wrap;max-height:180px;overflow:auto;"></pre>' +
-      '<div style="margin-top:6px;font-size:20px;color:#ccc;">EVREN modelleri — Aşağı ok ile listeye inin. <b>Tamam</b> = okuma modeli (görüntüyü okur), <b>Sağ</b> = çeviri modeli (OCR metnini çevirir), <b>Sol</b> = seçimi kaldır, <b>Geri</b> = kapat.</div>' +
+      '<div id="vt_model_head" style="margin-top:6px;font-size:20px;color:#ccc;">EVREN modelleri — Aşağı ok ile listeye inin. <b>Tamam</b> = okuma modeli (görüntüyü okur), <b>Sağ</b> = çeviri modeli (OCR metnini çevirir), <b>Sol</b> = seçimi kaldır, <b>Geri</b> = kapat.</div>' +
       '<div id="vt_model_list" style="margin-top:8px;overflow:auto;flex:1;min-height:120px;border:1px solid #333;border-radius:6px;"></div>' +
       '</div>';
     document.body.appendChild(wrap);

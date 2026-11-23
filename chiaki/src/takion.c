@@ -433,6 +433,14 @@ CHIAKI_EXPORT ChiakiErrorCode chiaki_takion_connect(ChiakiTakion *takion, Chiaki
 #endif
 		}
 
+#ifdef CHIAKI_TIZEN_WASM
+		takion->tizen_peer_len = 0;
+		if(info->sa_len <= sizeof(takion->tizen_peer))
+		{
+			memcpy(&takion->tizen_peer, info->sa, info->sa_len);
+			takion->tizen_peer_len = (socklen_t)info->sa_len;
+		}
+#endif
 		r = connect(takion->sock, info->sa, info->sa_len);
 		if(r < 0)
 		{
@@ -509,6 +517,15 @@ CHIAKI_EXPORT ChiakiErrorCode chiaki_takion_crypt_advance_key_pos(ChiakiTakion *
 CHIAKI_EXPORT ChiakiErrorCode chiaki_takion_send_raw(ChiakiTakion *takion, const uint8_t *buf, size_t buf_size)
 {
 	int r = send(takion->sock, buf, buf_size, 0);
+#ifdef CHIAKI_TIZEN_WASM
+	if(r < 0 && takion->tizen_peer_len)
+	{
+		static int logged = 0;
+		if(!logged++)
+			CHIAKI_LOGW(takion->log, "Takion send() failed (" CHIAKI_SOCKET_ERROR_FMT "), using sendto()", CHIAKI_SOCKET_ERROR_VALUE);
+		r = sendto(takion->sock, buf, buf_size, 0, (struct sockaddr *)&takion->tizen_peer, takion->tizen_peer_len);
+	}
+#endif
 	if(r < 0)
 	{
 		CHIAKI_LOGE(takion->log, "Takion failed to send raw: " CHIAKI_SOCKET_ERROR_FMT, CHIAKI_SOCKET_ERROR_VALUE);

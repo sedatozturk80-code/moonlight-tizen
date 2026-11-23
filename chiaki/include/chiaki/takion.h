@@ -168,6 +168,11 @@ typedef struct chiaki_takion_t
 	ChiakiTakionCallback cb;
 	void *cb_user;
 	chiaki_socket_t sock;
+#ifdef CHIAKI_TIZEN_WASM
+	// peer address, for a sendto() fallback when send() on the connected UDP socket fails
+	struct sockaddr_storage tizen_peer;
+	socklen_t tizen_peer_len;
+#endif
 	ChiakiThread thread;
 	ChiakiStopPipe stop_pipe;
 	uint32_t tag_local;
