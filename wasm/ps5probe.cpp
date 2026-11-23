@@ -14,6 +14,11 @@
 #include <unistd.h>
 
 #include <cstring>
+#include <cstdlib>
+#include <atomic>
+
+#include <emscripten.h>
+#include <emscripten/threading.h>
 #include <string>
 #include <thread>
 
@@ -23,8 +28,21 @@ constexpr int kPs5DiscoveryPort = 9302;
 constexpr const char* kPs5DiscoveryRequest =
   "SRCH * HTTP/1.1\ndevice-discovery-protocol-version:00030010\n";
 
+// Messages go to JS without blocking the calling thread: chiaki's network threads
+// log from the hot path, and a blocking call to the main thread for each line
+// stalls packet handling.
+void DeliverToJs(char* text) {
+  EM_ASM({ handleMessage(UTF8ToString($0)); }, text);
+  free(text);
+}
+
+std::atomic<int> g_reportBudget{100000};
+
 void Report(const std::string& text) {
-  PostToJs("VT_PS5: " + text);
+  std::string full = "VT_PS5: " + text;
+  char* copy = strdup(full.c_str());
+  if (!copy) return;
+  emscripten_async_run_in_main_runtime_thread(EM_FUNC_SIG_VI, (void*)DeliverToJs, copy);
 }
 
 void DiscoverThread(std::string ip) {
@@ -118,8 +136,16 @@ namespace {
 
 void ChiakiLogToJs(ChiakiLogLevel level, const char* msg, void* user) {
   (void)user;
-  if (level & (CHIAKI_LOG_ERROR | CHIAKI_LOG_WARNING | CHIAKI_LOG_INFO))
-    Report(std::string("chiaki: ") + msg);
+  if (!(level & (CHIAKI_LOG_ERROR | CHIAKI_LOG_WARNING | CHIAKI_LOG_INFO)))
+    return;
+  // Skip the chatty per-packet lines; keep the connection milestones and errors
+  static const char* noisy[] = {"re-sending packet", "CTRL RECEIVED", "offset 0", "Heartbeat",
+                                "dropping data", "Takion Send Buffer", nullptr};
+  for (int i = 0; noisy[i]; i++)
+    if (strstr(msg, noisy[i])) return;
+  if (msg[0] == ' ' || (msg[0] >= '0' && msg[0] <= '9')) return;  // hex dump lines
+  if (--g_reportBudget < 0) return;
+  Report(std::string("chiaki: ") + msg);
 }
 
 void ChiakiFoundHost(ChiakiDiscoveryHost* host, void* user) {
@@ -427,7 +453,8 @@ void StreamThread(std::string ip, std::string registKeyHex, std::string rpKeyHex
   size_t idSize = sizeof(info.psn_account_id);
   chiaki_base64_decode(accountB64.c_str(), accountB64.size(), info.psn_account_id, &idSize);
 
-  Report("TEST 3 başladı: PS5 durumu soruluyor (" + ip + ")");
+  g_reportBudget = 120;
+  Report("TEST 3 başladı (720p 30 kare/sn): PS5 durumu soruluyor (" + ip + ")");
   int state = QueryState(&log, ip);
   if (state == 2) {
     char keyStr[CHIAKI_SESSION_AUTH_SIZE + 1];
@@ -449,7 +476,7 @@ void StreamThread(std::string ip, std::string registKeyHex, std::string rpKeyHex
 
   info.ps5 = true;
   info.host = ip.c_str();
-  chiaki_connect_video_profile_preset(&info.video_profile, CHIAKI_VIDEO_RESOLUTION_PRESET_1080p, CHIAKI_VIDEO_FPS_PRESET_60);
+  chiaki_connect_video_profile_preset(&info.video_profile, CHIAKI_VIDEO_RESOLUTION_PRESET_720p, CHIAKI_VIDEO_FPS_PRESET_30);
   info.video_profile.codec = CHIAKI_CODEC_H264;
   info.video_profile_auto_downgrade = true;
   info.enable_keyboard = false;

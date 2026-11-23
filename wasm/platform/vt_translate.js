@@ -516,7 +516,7 @@
     wrap.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,0.88);display:flex;align-items:center;justify-content:center;';
     wrap.innerHTML =
       '<div style="background:#1e2230;color:#fff;padding:28px 40px;border-radius:12px;width:70%;max-height:90vh;display:flex;flex-direction:column;font:24px sans-serif;">' +
-      '<div style="font-size:32px;margin-bottom:10px;">PS5 Türkçe çeviri — ayarlar (v20)</div>' +
+      '<div style="font-size:32px;margin-bottom:10px;">PS5 Türkçe çeviri — ayarlar (v21)</div>' +
       '<div id="vt_key_state" style="margin-bottom:8px;color:#9fe;"></div>' +
       '<div id="vt_evren_err" style="margin-bottom:8px;color:#f99;font-size:18px;word-break:break-all;max-height:160px;overflow:auto;"></div>' +
       '<div style="margin-bottom:12px;color:#ccc;font-size:20px;">Yeni anahtar: kutuyu seçip yazın ya da SmartThings\'ten yapıştırın, sonra Enter/Bitti. AIza ile başlayan anahtar Gemini, diğerleri EVREN olarak saklanır; ikisi de varsa önce EVREN, olmazsa Gemini kullanılır.</div>' +
@@ -667,7 +667,7 @@
         el('vt_ps5_out').textContent = '';
         if (!reg || !ip3) msg.textContent = 'Önce SARI tuşla PS5\'i bulup eşleştirin.';
         else if (typeof Module !== 'undefined' && Module.ps5StreamTest)
-          Module.ps5StreamTest(ip3, reg.regist_key, reg.rp_key, lsGet(PS5_ACCOUNT_STORAGE), 15);
+          Module.ps5StreamTest(ip3, reg.regist_key, reg.rp_key, lsGet(PS5_ACCOUNT_STORAGE), 20);
         else msg.textContent = 'Uygulama modülü henüz yüklenmedi, birkaç saniye sonra tekrar deneyin.';
       } else if (code === 405 || code === 114 || code === 406 || code === 115) {
         // Yellow key / F3: look for the PS5 on the network; blue key / F4: chiaki-ng core test
