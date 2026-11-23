@@ -462,7 +462,7 @@ bool Ps5Mode() {
 
 // Runs on Moonlight's connection thread in place of LiStartConnection.
 // Returns 0 once the session has been started, or a negative error.
-int Ps5ConnectionRun(const std::string& host, int width, int height, int fps) {
+int Ps5ConnectionRun(const std::string& host, int width, int height, int fps, int bitrateKbps) {
   s_ps5Mode = true;
   s_stopRequested = false;
   s_connected = false;
@@ -545,10 +545,14 @@ int Ps5ConnectionRun(const std::string& host, int width, int height, int fps) {
     return -1;
   }
 
-  // 720p at 30 frames per second, H.264: 1080p60 froze the TV while drawing the picture
-  // through the GL texture (720p30 is also what the earlier PS5 tests ran without loss)
-  (void)width; (void)height; (void)fps;
-  chiaki_connect_video_profile_preset(&info.video_profile, CHIAKI_VIDEO_RESOLUTION_PRESET_720p, CHIAKI_VIDEO_FPS_PRESET_30);
+  // The PS5 profile follows the app's resolution, frame rate and bitrate settings (H.264)
+  ChiakiVideoResolutionPreset preset = CHIAKI_VIDEO_RESOLUTION_PRESET_1080p;
+  if (height <= 540) preset = CHIAKI_VIDEO_RESOLUTION_PRESET_540p;
+  else if (height <= 720) preset = CHIAKI_VIDEO_RESOLUTION_PRESET_720p;
+  chiaki_connect_video_profile_preset(&info.video_profile, preset,
+                                      fps >= 60 ? CHIAKI_VIDEO_FPS_PRESET_60 : CHIAKI_VIDEO_FPS_PRESET_30);
+  (void)width;
+  if (bitrateKbps >= 2000 && bitrateKbps <= 50000) info.video_profile.bitrate = (unsigned int)bitrateKbps;
   info.video_profile.codec = CHIAKI_CODEC_H264;
   int streamWidth = (int)info.video_profile.width;
   int streamHeight = (int)info.video_profile.height;

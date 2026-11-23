@@ -506,6 +506,9 @@
     var switchOn = function (id) { try { return $(id).parent().hasClass('is-checked') ? 1 : 0; } catch (e) { return 0; } };
     var res = setting('#selectResolution', '1920:1080').split(':');
     var fps = setting('#selectFramerate', '60');
+    // The PS5 stream follows the app's bitrate setting (Mbps on the slider)
+    var bitrateKbps = 15000;
+    try { var mbps = parseFloat($('#bitrateSlider').val()); if (mbps > 0) bitrateKbps = Math.round(mbps * 1000); } catch (e) {}
     // The PS5's sound is played with Web Audio, so it doesn't depend on the TV's video player
     // starting (with EMSS audio the sound waits for the first decoded picture)
     var audioBackend = setting('#selectAudioBackend', 'EMSS') === 'Disabled' ? 'Disabled' : 'WebAudio';
@@ -521,7 +524,7 @@
     $('#loadingSpinnerMessage').text('PS5\'e bağlanılıyor...');
     showStreamMode();
     sendMessage('startRequest', [
-      host, 0, res[0], res[1], fps, '15000', '00000000000000000000000000000000', '0',
+      host, 0, res[0], res[1], fps, String(bitrateKbps), '00000000000000000000000000000000', '0',
       '7.1.431.-1', '', '', 1,
       switchOn('#framePacingSwitch'), 0, 0, switchOn('#rumbleFeedbackSwitch'), 0, 0, 0,
       audioBackend, 'Stereo', switchOn('#audioSyncSwitch'), jitter, 0, 0,
@@ -578,7 +581,7 @@
     wrap.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,0.88);display:flex;align-items:center;justify-content:center;';
     wrap.innerHTML =
       '<div style="background:#1e2230;color:#fff;padding:28px 40px;border-radius:12px;width:70%;max-height:90vh;display:flex;flex-direction:column;font:24px sans-serif;">' +
-      '<div style="font-size:32px;margin-bottom:10px;">PS5 Türkçe çeviri — ayarlar (v33)</div>' +
+      '<div style="font-size:32px;margin-bottom:10px;">PS5 Türkçe çeviri — ayarlar (v34)</div>' +
       '<div id="vt_key_state" style="margin-bottom:8px;color:#9fe;"></div>' +
       '<div id="vt_evren_err" style="margin-bottom:8px;color:#f99;font-size:18px;word-break:break-all;max-height:160px;overflow:auto;"></div>' +
       '<div style="margin-bottom:12px;color:#ccc;font-size:20px;">Yeni anahtar: kutuyu seçip yazın ya da SmartThings\'ten yapıştırın, sonra Enter/Bitti. AIza ya da AQ. ile başlayan anahtar Gemini, diğerleri EVREN olarak saklanır; ikisi de varsa önce EVREN, olmazsa Gemini kullanılır.</div>' +
